@@ -1,4 +1,4 @@
-.PHONY: help setup dev verify build start package checksum backup-test
+.PHONY: help setup dev verify build start package checksum backup-test installer-test
 help:
 	@echo "make setup     Install dependencies and compile the public packages"
 	@echo "make dev       Start the local console and broker"
@@ -27,3 +27,5 @@ checksum:
 	bash scripts/checksum.sh
 backup-test:
 	bash scripts/backup-test.sh
+installer-test:
+	bash scripts/installer-test.sh

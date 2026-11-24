@@ -95,6 +95,25 @@ payload=(package.json package-lock.json tsconfig.json next.config.ts next-env.d.
 for p in "${payload[@]}"; do [ -e "$build/$p" ] || { echo "package: missing $p in the build" >&2; exit 1; }; done
 tar -C "$build" --exclude=.next/cache --exclude=.next/trace --exclude='.next/trace-*' --exclude=.next/diagnostics --exclude='.env*' --exclude='packages/*/node_modules' -cf - "${payload[@]}" | tar -xf - -C "$out/stage"
 rm -rf "$out/stage/.next/cache" "$out/stage/.next/diagnostics" "$out/stage/.next/trace" "$out/stage"/.next/trace-*
+# Bundle the pinned Node.js so a host needs no system Node. The official tarball is downloaded over
+# HTTPS and must match the sha256 in scripts/node-pins.txt (read from the exported commit).
+command -v xz >/dev/null || { echo "package: xz is required to unpack the Node.js tarball" >&2; exit 1; }
+node_tarball="node-$NODE_PIN-linux-$arch.tar.xz"
+node_expect=$(awk -v f="$node_tarball" '$2==f {print $1}' "$build/scripts/node-pins.txt")
+[[ "$node_expect" =~ ^[0-9a-f]{64}$ ]] || { echo "package: no pinned sha256 for $node_tarball" >&2; exit 1; }
+mkdir -m 0700 "$out/node-dl"
+curl -fsSL --proto '=https' --tlsv1.2 -o "$out/node-dl/$node_tarball" "https://nodejs.org/dist/$NODE_PIN/$node_tarball"
+node_tarball_sha=$(sha "$out/node-dl/$node_tarball")
+[ "$node_tarball_sha" = "$node_expect" ] || { echo "package: $node_tarball sha256 $node_tarball_sha does not match the pin" >&2; exit 1; }
+node_top="node-$NODE_PIN-linux-$arch"
+tar -xJf "$out/node-dl/$node_tarball" -C "$out/node-dl" "$node_top/bin/node" "$node_top/LICENSE"
+mkdir -p "$out/stage/node/bin"
+install -m 0755 "$out/node-dl/$node_top/bin/node" "$out/stage/node/bin/node"
+install -m 0644 "$out/node-dl/$node_top/LICENSE" "$out/stage/node/LICENSE"
+bundled_node_sha=$(sha "$out/stage/node/bin/node")
+"$out/stage/node/bin/node" -p process.version | grep -qx "$NODE_PIN" || { echo "package: the bundled Node is not $NODE_PIN" >&2; exit 1; }
+rm -rf "$out/node-dl"
+
 stray=$(find "$out/stage" -name '.env*')
 if [ -n "$stray" ]; then echo "package: .env file in payload" >&2; exit 1; fi
 
@@ -125,18 +144,18 @@ while IFS= read -r f; do
 done < "$out/files.list"
 manifest_sha=$(sha "$out/manifest.tmp")
 lock=$(sha "$build/package-lock.json")
-node_path=$(command -v node)
-node_sha=$(sha "$node_path")
-node - "$commit" "$tree" "$version" "$arch" "$node_version" "$node_sha" "$lock" "$epoch" "$manifest_sha" "$per_build" > "$out/stage/RELEASE.json" <<'JS'
-const [commit, tree, version, arch, node, node_binary_sha256, lockfile_sha256, source_epoch, manifest_sha256, perBuild] = process.argv.slice(2)
-console.log(JSON.stringify({ name: 'openpassword', version, commit, tree, platform: 'linux', arch, node, node_binary_sha256, lockfile_sha256, source_epoch: Number(source_epoch), manifest_sha256, per_build_files: perBuild.split('\n').filter(Boolean) }, null, 2))
+node - "$commit" "$tree" "$version" "$arch" "$node_version" "$bundled_node_sha" "$node_tarball_sha" "$lock" "$epoch" "$manifest_sha" "$per_build" > "$out/stage/RELEASE.json" <<'JS'
+const [commit, tree, version, arch, node, node_binary_sha256, node_tarball_sha256, lockfile_sha256, source_epoch, manifest_sha256, perBuild] = process.argv.slice(2)
+console.log(JSON.stringify({ name: 'openpassword', version, commit, tree, platform: 'linux', arch, node, node_binary_sha256, node_tarball_sha256, lockfile_sha256, source_epoch: Number(source_epoch), manifest_sha256, per_build_files: perBuild.split('\n').filter(Boolean) }, null, 2))
 JS
 
-# 4. Deterministic archive, written under a temporary name and renamed only when complete.
+# 4. Normalized archive (sorted names, fixed mtime and owner, gzip -n), written under a temporary name and renamed
+# only when complete. Normalized packing makes the manifest reproducible; the archive digest still differs between
+# builds because of the per-build files listed in scripts/per-build-files.txt.
 tmp=$out/$name.tar.gz.partial
 tar -C "$out/stage" --mode=u+rwX,go+rX,go-w --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner --format=gnu -cf - . | gzip -n > "$tmp"
 listing=$(tar -tzf "$tmp")
-for must in ./RELEASE.json ./server/main.ts ./packages/cli/dist/index.js ./.next/BUILD_ID ./node_modules/next/dist/bin/next ./node_modules/tsx/package.json; do
+for must in ./RELEASE.json ./server/main.ts ./packages/cli/dist/index.js ./.next/BUILD_ID ./node_modules/next/dist/bin/next ./node_modules/tsx/package.json ./node/bin/node; do
   grep -qx "$must" <<<"$listing" || { rm -f "$tmp"; echo "package: archive lacks $must" >&2; exit 1; }
 done
 if grep -Eq '(^|/)\.env|^\./\.next/cache|^\./node_modules/(playwright|playwright-core)(/|$)' <<<"$listing"; then rm -f "$tmp"; echo "package: archive contains excluded files" >&2; exit 1; fi
