@@ -106,7 +106,7 @@ async function main() {
     return
   }
   if (cmd === 'version') {
-    console.log('OpenPassword CLI 0.2.0 · protocol 1')
+    console.log('OpenPassword CLI 0.5.0 · protocol 1')
     return
   }
   if (cmd === 'setup-code') {

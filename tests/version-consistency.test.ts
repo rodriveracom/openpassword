@@ -18,5 +18,8 @@ test('every other version source agrees with package.json', () => {
   // The MCP server string is either read from package.json or a literal that must match it.
   const literal = read('packages/cli/mcp.ts').match(/new McpServer\(\{[^}]*version:\s*'([^']+)'/)?.[1]
   if (literal !== undefined) assert.equal(literal, pkg.version, 'packages/cli/mcp.ts version literal')
+  // `openpassword version` must name the release that carries it.
+  const cli = read('packages/cli/index.ts').match(/'OpenPassword CLI (\d+\.\d+\.\d+) · protocol/)?.[1]
+  assert.equal(cli, pkg.version, 'packages/cli/index.ts version output')
   assert.match(read('PARITY.md'), new RegExp('working ' + pkg.version.replace(/\./g, '\\.') + ' candidate'), 'PARITY.md names the version')
 })
