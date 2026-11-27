@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 candidate — durable activity and workflows
+
+- The console and CLI now read activity carried by a private Dostoevsky gateway. Existing activity cursors survive restarts. Usage and metering transitions have a transactional delivery queue.
+- Ephemeral drives enrollment expiry, approval decisions, revocation and credential-rotation propagation, the backup snapshot step, and offline rotation of the vault wrapping key.
+- The local client can retry a lost device-token response. An expired pairing now reports the reason to the operator.
+- Gate builds include both pinned engine binaries. See [engine operations](docs/engine-operations.md) for retention, rollback, recovery and verification.
+
 ## Unreleased security review
 
 ### Human vault security and remote model custody (unreleased)

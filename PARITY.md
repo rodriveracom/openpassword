@@ -1,6 +1,6 @@
 # Replacement status
 
-This is a working 0.4.1 candidate. Earlier deployments of the predecessor service still have capabilities and wire contracts that this version does not fully implement. The names in the provider directory identify executable adapters. They do not establish method-for-method parity or vendor certification.
+This is a working 0.5.0 candidate. Earlier deployments of the predecessor service still have capabilities and wire contracts that this version does not fully implement. The names in the provider directory identify executable adapters. They do not establish method-for-method parity or vendor certification.
 
 The comparison baselines are the predecessor service at b83b7f7ce30e10521cfdc4fa6e81352a3e771b04 and its integrations library at 4647f2cd9f79dbbcd168165d719f6ba1173f05f6. The inventories below describe the exported source. Unbuilt proposals in the reference integration backlog are separate from shipped Python functionality.
 

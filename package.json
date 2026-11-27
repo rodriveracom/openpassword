@@ -1,6 +1,6 @@
 {
   "name": "openpassword",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "",
   "scripts": {
     "dev": "concurrently -k \"node --import tsx server/main.ts\" \"next dev -H 127.0.0.1\"",

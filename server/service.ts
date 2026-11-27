@@ -1,3 +1,4 @@
+import { engines, claimEngineOwner } from './engines.ts'
 import { isIP } from 'node:net'
 import { httpContract } from './http-contract.ts'
 import { personalVault } from './personal-vault.ts'
@@ -82,20 +83,24 @@ export function trustedProxies(value: string | undefined) {
       (bits !== undefined && (!/^[0-9]{1,3}$/.test(bits) || Number(bits) > limit)) ||
       (bits !== undefined && Number(bits) < 8)
     )
-      throw Error('OPENPASSWORD_TRUST_PROXY must list proxy IP addresses or CIDR ranges of at least 8 bits')
+      throw Error(
+        'OPENPASSWORD_TRUST_PROXY must list proxy IP addresses or CIDR ranges of at least 8 bits',
+      )
   }
   return list
 }
 export function grantRate(value: string | undefined) {
   if (value === undefined) return 600
   if (!/^[0-9]{1,9}$/.test(value.trim()) || value !== value.trim())
-    throw Error('OPENPASSWORD_GRANT_RATE must be a whole number of requests per minute (0 disables it)')
+    throw Error(
+      'OPENPASSWORD_GRANT_RATE must be a whole number of requests per minute (0 disables it)',
+    )
   const rate = Number(value)
   if (rate === 0)
     console.warn('OPENPASSWORD_GRANT_RATE=0: the per-grant request ceiling is disabled')
   return rate
 }
-export type Limits = { trustProxy?: string; grantPerMinute?: number }
+export type Limits = { engineBin?: string; trustProxy?: string; grantPerMinute?: number }
 export function service(
   dir: string,
   origin = 'http://localhost:3000',
@@ -104,11 +109,30 @@ export function service(
   initializeHostPolicy = false,
   limits: Limits = {},
 ) {
+  const owner = limits.engineBin ? claimEngineOwner(dir) : undefined
+  try {
+    return createService(dir, origin, transport, relay, initializeHostPolicy, limits, owner)
+  } catch (error) {
+    owner?.close()
+    throw error
+  }
+}
+function createService(
+  dir: string,
+  origin = 'http://localhost:3000',
+  transport: typeof fetch = fetch,
+  relay = process.env.OPENPASSWORD_YOUTUBE_RELAY === '1',
+  initializeHostPolicy = false,
+  limits: Limits,
+  owner: ReturnType<typeof claimEngineOwner> | undefined,
+) {
   // The per-grant ceiling counts authenticated /v1 requests per grant per minute (default 600; 0 turns it off).
   // An empty or blank OPENPASSWORD_GRANT_RATE is refused: only an explicit 0 turns the ceiling off, and it says so.
   const grantPerMinute = limits.grantPerMinute ?? grantRate(process.env.OPENPASSWORD_GRANT_RATE)
   if (!Number.isSafeInteger(grantPerMinute) || grantPerMinute < 0)
-    throw Error('OPENPASSWORD_GRANT_RATE must be a whole number of requests per minute (0 disables it)')
+    throw Error(
+      'OPENPASSWORD_GRANT_RATE must be a whole number of requests per minute (0 disables it)',
+    )
   const proxies = trustedProxies(limits.trustProxy ?? process.env.OPENPASSWORD_TRUST_PROXY)
   const web = new URL(origin)
   if (
@@ -202,7 +226,8 @@ export function service(
   db.exec(
     "CREATE INDEX IF NOT EXISTS cli_connected ON events(tenant,subject,at) WHERE action='CLI connected'",
   )
-  const feed = activity(db)
+  const feed = activity(db, !!limits.engineBin)
+  let infrastructure: ReturnType<typeof engines> | undefined
   let draining = false
   let inFlight = 0
   api.decorate('beginDrain', () => {
@@ -236,7 +261,7 @@ export function service(
       now(),
       by,
     )
-    queueMicrotask(() => feed.signal(t, by))
+    if (!limits.engineBin) queueMicrotask(() => feed.signal(t, by))
   }
   function tx<T>(fn: () => T) {
     db.exec('BEGIN IMMEDIATE')
@@ -531,7 +556,9 @@ export function service(
     reply.header('OpenPassword-Protocol-Version', '1')
     if (
       r.url.startsWith('/v1/') &&
-      !['/v1/openapi.json', '/v1/chat/completions', '/v1/models', '/v1/delegation/check'].includes(r.url.split('?')[0])
+      !['/v1/openapi.json', '/v1/chat/completions', '/v1/models', '/v1/delegation/check'].includes(
+        r.url.split('?')[0],
+      )
     ) {
       const names = ['openpassword-protocol-version']
       const values = names.flatMap(
@@ -556,7 +583,10 @@ export function service(
       }
     }
     reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff')
-    if (!['GET','HEAD','OPTIONS'].includes(r.method) && r.headers['sec-fetch-site'] === 'cross-site')
+    if (
+      !['GET', 'HEAD', 'OPTIONS'].includes(r.method) &&
+      r.headers['sec-fetch-site'] === 'cross-site'
+    )
       fail(403, 'Cross-site request refused')
     if (r.headers.origin && r.headers.origin !== origin) fail(403, 'Origin refused')
     if (
@@ -611,7 +641,11 @@ export function service(
             : err.message,
     })
   })
-  api.addHook('onClose', async () => db.close())
+  api.addHook('onClose', async () => {
+    await infrastructure?.close()
+    db.close()
+    owner?.close()
+  })
   keymaster(
     api,
     (r) => ({ tenant: grant(r).tenant }),
@@ -619,7 +653,7 @@ export function service(
   )
   delegation(api, db, origin, session, seal, open, event)
   api.get('/health', async () => ({
-    status: draining ? 'draining' : 'ok',
+    status: draining ? 'draining' : infrastructure && !infrastructure.healthy() ? 'starting' : 'ok',
     drain_supported: true,
     in_flight: inFlight,
   }))
@@ -1635,9 +1669,36 @@ export function service(
       return issue({ id: g, expires })
     })
   })
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS pair_receipts(code TEXT PRIMARY KEY, attempt TEXT NOT NULL, grant_id TEXT NOT NULL, expires INTEGER NOT NULL, sealed TEXT NOT NULL);CREATE INDEX IF NOT EXISTS receipt_expiry ON pair_receipts(expires)',
+  )
   api.post('/v1/device/token', async (r, reply) => {
     const code = z.object({ device_code: name }).parse(r.body).device_code
+    const attempt = z.string().uuid().optional().parse(r.headers['idempotency-key'])
     return tx(() => {
+      run('DELETE FROM pair_receipts WHERE expires<=?', now())
+      const fingerprint = digest(code)
+      if (attempt) {
+        const receipt = get(
+          'SELECT * FROM pair_receipts WHERE code=? AND attempt=?',
+          fingerprint,
+          digest(attempt),
+        )
+        if (receipt) {
+          const g =
+            get(
+              'SELECT * FROM grants WHERE id=? AND active=1 AND expires>? AND access_until>?',
+              receipt.grant_id,
+              now(),
+              now(),
+            ) ?? fail(403, 'Grant unavailable')
+          hostAccess.bound(r, g.id, g.tenant)
+          checkIssuer(g)
+          const result = open(receipt.sealed, 'pair-receipt/' + fingerprint)
+          if (digest(result.access_token) !== g.access) fail(403, 'Grant unavailable')
+          return result
+        }
+      }
       const p =
         get('SELECT * FROM pairs WHERE code=? AND expires>?', digest(code), now()) ??
         fail(400, 'Expired pairing')
@@ -1656,7 +1717,17 @@ export function service(
       run('DELETE FROM pairs WHERE id=?', p.id)
       actor(g.id)
       event(g.tenant, 'CLI connected', g.id)
-      return issue(g)
+      const result = issue(g)
+      if (attempt)
+        run(
+          'INSERT INTO pair_receipts VALUES(?,?,?,?,?)',
+          fingerprint,
+          digest(attempt),
+          g.id,
+          Math.min(p.expires, now() + 60000),
+          seal(result, 'pair-receipt/' + fingerprint),
+        )
+      return result
     })
   })
   api.post('/v1/device/token/refresh', async (r) => {
@@ -1675,8 +1746,10 @@ export function service(
   })
   api.post('/v1/device/revoke', async (r, reply) => {
     const g = grant(r)
-    run('UPDATE grants SET active=0 WHERE id=?', g.id)
-    event(g.tenant, 'Access revoked', g.id)
+    tx(() => {
+      run('UPDATE grants SET active=0 WHERE id=?', g.id)
+      event(g.tenant, 'Access revoked', g.id)
+    })
     return reply.code(204).send()
   })
   api.delete('/admin/grants/:id', async (r) => {
@@ -1685,9 +1758,11 @@ export function service(
       get('SELECT * FROM grants WHERE id=? AND tenant=?', id(r), t) ??
       fail(404, 'Grant unavailable')
     if (!grantManager(session(r), g)) fail(403, 'Grant unavailable')
-    if (!run('UPDATE grants SET active=0 WHERE id=? AND tenant=?', id(r), t).changes)
-      fail(404, 'Grant unavailable')
-    event(t, 'Access revoked', id(r))
+    tx(() => {
+      if (!run('UPDATE grants SET active=0 WHERE id=? AND tenant=?', id(r), t).changes)
+        fail(404, 'Grant unavailable')
+      event(t, 'Access revoked', id(r))
+    })
     return { ok: true }
   })
   api.post('/admin/approvals/:id', async (r) => {
@@ -1702,7 +1777,7 @@ export function service(
         })
         .strict()
         .parse(r.body)
-    return tx(() => {
+    const result = tx(() => {
       const pending =
         get('SELECT conn FROM runs WHERE id=? AND tenant=?', id(r), t) ??
         fail(409, 'Approval unavailable')
@@ -1723,6 +1798,17 @@ export function service(
           checkDispatch(t, live.provider, 'loops.contacts.import_chunk')
         }
       }
+      if (infrastructure) {
+        const decision = approve ? 2 : 3
+        const changed = run(
+          "UPDATE engine_jobs SET ready=? WHERE kind='approval' AND ref=? AND ready=0",
+          decision,
+          id(r),
+        )
+        if (!changed.changes) fail(409, 'Approval already decided')
+        event(t, approve ? 'Request approved' : 'Request denied', id(r))
+        return { ok: true }
+      }
       if (
         !run(
           "UPDATE runs SET state=? WHERE tenant=? AND id=? AND state='pending'",
@@ -1741,6 +1827,14 @@ export function service(
       event(t, approve ? 'Request approved' : 'Request denied', id(r))
       return { ok: true }
     })
+    if (infrastructure) {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (!get("SELECT 1 FROM engine_jobs WHERE kind='approval' AND ref=?", id(r))) return result
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      return { ok: true, pending: true }
+    }
+    return result
   })
   const fenced = (r: FastifyRequest) =>
     String(r.headers['openpassword-capabilities'] ?? '')
@@ -3019,5 +3113,6 @@ export function service(
     seal,
     open,
   )
+  if (limits.engineBin) infrastructure = engines(db, limits.engineBin, feed.signal, feed.wakeAll)
   return api
 }

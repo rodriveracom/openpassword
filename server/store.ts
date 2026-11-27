@@ -87,7 +87,11 @@ export function wrapExistingMaster(dir: string, path: string) {
     unlockMaster(material, external)
     return
   }
-  const wrapped = wrapPrefix + encrypt(external, hexKey(material), wrapContext)
+  writeWrappedMaster(dir, hexKey(material), external)
+}
+function writeWrappedMaster(dir: string, master: Buffer, external: Buffer) {
+  const file = join(dir, 'master.key')
+  const wrapped = wrapPrefix + encrypt(external, master, wrapContext)
   const tmp = file + '.' + opaque()
   try {
     writeFileSync(tmp, wrapped, { mode: 0o600, flag: 'wx', flush: true })
@@ -101,6 +105,22 @@ export function wrapExistingMaster(dir: string, path: string) {
   } finally {
     if (existsSync(tmp)) unlinkSync(tmp)
   }
+}
+// Offline rotation. A retry after the atomic rename recognizes the new envelope.
+export function rotateWrappingKey(dir: string, previous: string, next: string) {
+  const oldKey = wrappingKey(dir, previous),
+    newKey = wrappingKey(dir, next)
+  if (oldKey.equals(newKey)) throw Error('Choose a different wrapping key')
+  const material = readPrivate(join(dir, 'master.key'))
+  if (!material.startsWith(wrapPrefix)) throw Error('Wrap the master key before rotation')
+  try {
+    unlockMaster(material, newKey)
+    return
+  } catch {
+    /* still wrapped with the previous key */
+  }
+  writeWrappedMaster(dir, unlockMaster(material, oldKey), newKey)
+  unlockMaster(readPrivate(join(dir, 'master.key')), newKey)
 }
 export function store(dir: string, wrappingFile = process.env.OPENPASSWORD_WRAPPING_KEY_FILE) {
   const policy = process.env.OPENPASSWORD_REQUIRE_WRAPPED_MASTER

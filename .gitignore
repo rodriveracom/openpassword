@@ -176,3 +176,4 @@ public/openpassword-cli.cjs
 public/openpassword-cli.sha256
 public/update-client.sh
 __pycache__/
+/engine-bin/

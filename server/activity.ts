@@ -4,10 +4,17 @@ export type Audience = { tenant: string; actor?: string }
 const key = (scope: Audience) => JSON.stringify([scope.tenant, scope.actor ?? null])
 
 // SQLite owns the cursor and payload. In-memory notifications only wake matching readers.
-export function activity(db: DatabaseSync) {
+export function activity(db: DatabaseSync, journal = false) {
   db.exec('CREATE INDEX IF NOT EXISTS events_actor_cursor ON events(tenant,actor,id)')
+  if (journal)
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS engine_cursor(id INTEGER PRIMARY KEY CHECK(id=1), visible INTEGER NOT NULL)',
+    )
   const queries = [false, true].map((scoped) => {
-    const where = ' FROM events WHERE tenant=?' + (scoped ? ' AND actor=?' : '')
+    const where =
+      ' FROM events WHERE tenant=?' +
+      (journal ? ' AND id <= (SELECT visible FROM engine_cursor WHERE id=1)' : '') +
+      (scoped ? ' AND actor=?' : '')
     const fields = 'SELECT id,action,subject,at,actor'
     return {
       latest: db.prepare(fields + where + ' ORDER BY id DESC LIMIT 100'),

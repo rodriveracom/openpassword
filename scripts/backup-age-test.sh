@@ -28,13 +28,16 @@ JS
 age-keygen -o "$t/id.txt" >/dev/null 2>&1; chmod 600 "$t/id.txt"
 age-keygen -y "$t/id.txt" > "$t/recipient"
 # The copy under test carries a .test-seams file, which turns on the test substitutes. The real directory never has one.
-cp -R deploy/backup "$t/bk"; : > "$t/bk/.test-seams"
+mkdir -p "$t/deploy" "$t/server" "$t/engine-bin"
+cp server/engine-cli.ts "$t/server/"
+cp engine-bin/ephemeral "$t/engine-bin/"
+cp -R deploy/backup "$t/deploy/bk"; : > "$t/deploy/bk/.test-seams"
 empty_stage() { [ -z "$(ls -A "$shm/stage")" ]; }
 # Every case runs in a clean environment holding only these settings; a case's own VAR=value arguments replace them, and
 # nothing set for one case reaches the next.
 base_env=(PATH="$PATH" HOME="$t" OPENPASSWORD_NODE="$node_bin" OPENPASSWORD_HOME="$t/data" OPENPASSWORD_BACKUP_STAGE="$shm/stage"
   OPENPASSWORD_BACKUP_SWAPS_FILE="$t/swaps" OPENPASSWORD_BACKUP_RECIPIENT="$t/recipient")
-bk() { env -i "${base_env[@]}" "$@" bash "$t/bk/backup.sh" --encrypt --direct; }
+bk() { env -i "${base_env[@]}" "$@" bash "$t/deploy/bk/backup.sh" --encrypt --direct; }
 backup() { bk; }
 restore() { env -i PATH="$PATH" HOME="$t" OPENPASSWORD_NODE="$node_bin" OPENPASSWORD_BACKUP_IDENTITY="$t/id.txt" bash deploy/backup/restore-encrypted.sh "$@"; }
 
@@ -113,7 +116,7 @@ fi
 swaps_with() { printf 'Filename\tType\tSize\tUsed\tPriority\n%s\n' "$1" > "$t/sw"; }
 classify() { # expected exit (0 safe, 1 unsafe), description, then env assignments for the case
   local want=$1 what=$2 got=0; shift 2
-  env -i PATH="$PATH" "$@" bash -c '. "$1"; swap_safe' bash "$t/bk/stage-check.sh" || got=$?
+  env -i PATH="$PATH" "$@" bash -c '. "$1"; swap_safe' bash "$t/deploy/bk/stage-check.sh" || got=$?
   [ "$got" = "$want" ] || fail "swap classifier: $what (wanted $want, got $got)"
 }
 classify 0 "no swap" OPENPASSWORD_BACKUP_SWAPS_FILE="$t/swaps"
@@ -139,7 +142,7 @@ mkdir "$t/shim"
 printf '#!/bin/sh\necho "rw,nosuid,noswap"\n' > "$t/shim/findmnt"; chmod 755 "$t/shim/findmnt"
 mount_case() { # expected, description, shim output, swap table
   local want=$1 what=$2 got=0; printf '#!/bin/sh\necho "%s"\n' "$3" > "$t/shim/findmnt"
-  env -i PATH="$t/shim:$PATH" OPENPASSWORD_BACKUP_SWAPS_FILE="$4" bash -c '. "$2"; memory_only "$1"' bash "$shm" "$t/bk/stage-check.sh" || got=$?
+  env -i PATH="$t/shim:$PATH" OPENPASSWORD_BACKUP_SWAPS_FILE="$4" bash -c '. "$2"; memory_only "$1"' bash "$shm" "$t/deploy/bk/stage-check.sh" || got=$?
   [ "$got" = "$want" ] || fail "memory_only: $what (wanted $want, got $got)"
 }
 swaps_with '/dev/sda2 partition 1000 0 -2'
@@ -147,13 +150,13 @@ mount_case 0 "tmpfs mounted noswap with disk swap present" "rw,nosuid,noswap" "$
 mount_case 1 "tmpfs without noswap with disk swap present" "rw,nosuid" "$t/sw"
 mount_case 0 "tmpfs without noswap and no swap" "rw,nosuid" "$t/swaps"
 if [ "$(stat -f -c %T /var/tmp 2>/dev/null)" != tmpfs ] && [ "$(stat -f -c %T /var/tmp 2>/dev/null)" != ramfs ]; then
-  got=0; env -i PATH="$PATH" bash -c '. "$1"; memory_only /var/tmp' bash "$t/bk/stage-check.sh" || got=$?
+  got=0; env -i PATH="$PATH" bash -c '. "$1"; memory_only /var/tmp' bash "$t/deploy/bk/stage-check.sh" || got=$?
   [ "$got" = 1 ] || fail "memory_only accepted a directory that is not on tmpfs or ramfs"
 fi
 
 # 4c. Search permission on the zram directory: tested as an unprivileged user, because root ignores directory permissions.
 share=$shm/share; mkdir -p "$share/sysfs/block/zram0"; chmod 755 "$shm" "$share" "$share/sysfs" "$share/sysfs/block"
-cp "$t/bk/stage-check.sh" "$share/stage-check.sh"; : > "$share/.test-seams"
+cp "$t/deploy/bk/stage-check.sh" "$share/stage-check.sh"; : > "$share/.test-seams"
 printf 'Filename\tType\tSize\tUsed\tPriority\n/dev/zram0 partition 1000 0 100\n' > "$share/swaps"
 chmod 644 "$share/stage-check.sh" "$share/.test-seams" "$share/swaps"
 as_other() { # run a command as an unprivileged user (root is dropped to nobody; anyone else is already unprivileged)
@@ -182,7 +185,7 @@ env -i "${base_env[@]}" OPENPASSWORD_BACKUP_AGE="$t/seam-age" OPENPASSWORD_BACKU
 printf 'Filename\tType\tSize\tUsed\tPriority\n/dev/sda2 partition 1000 0 -2\n' > "$t/sw-disk"
 got=0; env -i PATH="$PATH" OPENPASSWORD_BACKUP_SWAPS_FILE="$t/sw-disk" bash -c '. deploy/backup/stage-check.sh; [ "$SWAPS" = /proc/swaps ]' || got=$?
 [ "$got" = 0 ] || fail "the swap table override was honored without .test-seams"
-err=$(env -i "${base_env[@]}" SUDO_USER=operator OPENPASSWORD_BACKUP_RECIPIENT="$t/recipient" bash "$t/bk/backup.sh" --encrypt --direct 2>&1 >/dev/null || true)
+err=$(env -i "${base_env[@]}" SUDO_USER=operator OPENPASSWORD_BACKUP_RECIPIENT="$t/recipient" bash "$t/deploy/bk/backup.sh" --encrypt --direct 2>&1 >/dev/null || true)
 case "$err" in *"/etc/openpassword/backup.recipient"*|*"/opt/openpassword/current/node/bin/node"*) ;; *) fail "through sudo an environment override was honored: $err" ;; esac
 [ ! -e "$t/shim-ran" ] || fail "something ran that should not have"
 
@@ -193,7 +196,7 @@ refuses "an encryption failure" OPENPASSWORD_BACKUP_AGE="$t/bin/age"
 printf '#!/bin/sh\nsleep 30\n' > "$t/bin/age"
 # Terminate the whole process group, as Ctrl-C or a service stop does, without killing any child by hand.
 command -v setsid >/dev/null || fail "setsid is required"
-env -i "${base_env[@]}" OPENPASSWORD_BACKUP_AGE="$t/bin/age" setsid bash "$t/bk/backup.sh" --encrypt --direct > "$t/o6" 2>/dev/null &
+env -i "${base_env[@]}" OPENPASSWORD_BACKUP_AGE="$t/bin/age" setsid bash "$t/deploy/bk/backup.sh" --encrypt --direct > "$t/o6" 2>/dev/null &
 pid=$!
 for _ in $(seq 1 100); do
   [ -s "$shm/stage"/*/vault.sqlite ] 2>/dev/null && break
@@ -215,7 +218,7 @@ opbk init > "$t/op-init.out" 2>&1 || fail "operator init"
 if grep -q 'AGE-SECRET-KEY' "$t/op-init.out"; then fail "operator init printed private key material"; fi
 grep -q "$(cat "$op/public.txt")" "$t/op-init.out" || fail "operator init did not show the public line"
 opbk init >/dev/null 2>&1 && fail "operator init replaced an existing key"
-env -i "${base_env[@]}" OPENPASSWORD_BACKUP_RECIPIENT="$op/public.txt" bash "$t/bk/backup.sh" --encrypt --direct > "$t/op.age" || fail "backup for the operator's key"
+env -i "${base_env[@]}" OPENPASSWORD_BACKUP_RECIPIENT="$op/public.txt" bash "$t/deploy/bk/backup.sh" --encrypt --direct > "$t/op.age" || fail "backup for the operator's key"
 opbk check "$t/op.age" > "$t/op-check.out" 2>&1 || fail "operator check: $(cat "$t/op-check.out")"
 grep -q 'RESTORE CHECK PASSED' "$t/op-check.out" || fail "operator check did not report success"
 grep -Eq '^  t +1$' "$t/op-check.out" || fail "operator check did not list the vault's table and its row count: $(cat "$t/op-check.out")"

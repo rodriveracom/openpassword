@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 // Gate operator on the build host; no sudo. Check the locked transitive graph before installing it.
 import { readFileSync } from 'node:fs'
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
@@ -62,3 +63,28 @@ async function worker() {
 await Promise.all(Array.from({ length: 8 }, worker))
 if (failures.length) throw Error('Dependency age gate refused:\n' + failures.sort().join('\n'))
 console.log('Verified minimum age for ' + packages.size + ' registry packages')
+
+// Source pins carry Ephemeral's complete third-party vendor tree on the offline gate.
+const vendored = execFileSync(
+  'tar',
+  ['-xOzf', 'vendor/dogfood/ephemeral.tar.gz', 'vendor/modules.txt'],
+  { encoding: 'utf8' },
+)
+const modules = [...vendored.matchAll(/^# ([a-z0-9./_-]+) (v[0-9A-Za-z.+-]+)$/gm)]
+if (
+  !modules.length ||
+  modules.length !== vendored.split('\n').filter((line) => line.startsWith('# ')).length
+)
+  throw Error('Unrecognized Go dependency list')
+for (const [, name, version] of modules) {
+  const response = await fetch(
+    'https://proxy.golang.org/' + name + '/@v/' + encodeURIComponent(version) + '.info',
+    { redirect: 'error', signal: AbortSignal.timeout(20000) },
+  )
+  if (!response.ok) throw Error('Missing publication metadata for ' + name)
+  const metadata = await response.json(),
+    published = Date.parse(metadata.Time)
+  if (metadata.Version !== version || !Number.isFinite(published) || published > cutoff)
+    throw Error('Dependency age gate refused ' + name + '@' + version)
+}
+console.log('Verified minimum age for ' + modules.length + ' vendored Go modules')

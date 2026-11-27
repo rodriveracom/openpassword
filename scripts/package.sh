@@ -76,6 +76,7 @@ name="openpassword-$version-linux-$arch"
   cd "$build"
   node scripts/check-dependency-age.ts
   npm ci
+  sh scripts/build-engines.sh
   npm run packages
   npm run build
   npm prune --omit=dev
@@ -102,7 +103,7 @@ for f in $script_refs; do
 done
 
 # 2. Stage an explicit runtime payload.
-payload=(SECURITY.md package.json package-lock.json tsconfig.json next.config.ts next-env.d.ts LICENSE README.md CHANGELOG.md PARITY.md app brand registry deploy docs public server packages .next node_modules)
+payload=(engine-bin SECURITY.md package.json package-lock.json tsconfig.json next.config.ts next-env.d.ts LICENSE README.md CHANGELOG.md PARITY.md app brand registry deploy docs public server packages .next node_modules)
 for p in "${payload[@]}"; do [ -e "$build/$p" ] || { echo "package: missing $p in the build" >&2; exit 1; }; done
 tar -C "$build" --exclude=.next/cache --exclude=.next/trace --exclude='.next/trace-*' --exclude=.next/diagnostics --exclude='.env*' --exclude='packages/*/node_modules' -cf - "${payload[@]}" | tar -xf - -C "$out/stage"
 rm -rf "$out/stage/.next/cache" "$out/stage/.next/diagnostics" "$out/stage/.next/trace" "$out/stage"/.next/trace-*

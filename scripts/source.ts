@@ -5,6 +5,10 @@ import { gzipSync } from 'node:zlib'
 import { join } from 'node:path'
 const inputs = [
   'public/appearance.js',
+  'server/dostoevsky/index.js',
+  'vendor/dogfood/dostoevsky.tar.gz',
+  'vendor/dogfood/ephemeral.tar.gz',
+  'vendor/dogfood/SHA256SUMS',
   'README.md',
   'CHANGELOG.md',
   'CONTRIBUTING.md',

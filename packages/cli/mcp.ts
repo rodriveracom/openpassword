@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { OpenPassword } from '@openpassword/client'
 
 export async function serve(client: () => Promise<OpenPassword>) {
-  const server = new McpServer({ name: 'openpassword', version: '0.4.1' })
+  const server = new McpServer({ name: 'openpassword', version: '0.5.0' })
   const result = (data: unknown) => ({
     content: [{ type: 'text' as const, text: JSON.stringify(data) }],
   })

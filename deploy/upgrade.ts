@@ -230,6 +230,8 @@ export function refuseVaultDowngrade(targetDir: string | null, stateDir: string 
   if (!fs.existsSync(vault)) return
   const db = new DatabaseSync(vault, { readOnly: true })
   try {
+    if (!fs.existsSync(join(targetDir,'server/engines.ts')) && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='engine_cursor'").get())
+      throw Error('Restore the matching pre-upgrade snapshot before starting a release without workflow support.')
     if (!fs.existsSync(join(targetDir, 'server/passkeys.ts'))) {
       const has = (name: string) =>
         db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)
@@ -309,9 +311,9 @@ import { join } from 'node:path';
 import { service } from './server/service.ts';
 const home=mkdtempSync(join(tmpdir(),'op-check-'));
 try {
- const api=service(home);
+ const api=service(home,undefined,undefined,undefined,false,{engineBin:join(process.cwd(),'engine-bin')});
  try {const url=await api.listen({host:'127.0.0.1',port:0});
- if((await (await fetch(url+'/health')).json()).status!=='ok') throw Error('Broker unavailable');
+ let ready=false; for(let attempt=0;attempt<100;attempt++){if((await (await fetch(url+'/health')).json()).status==='ok'){ready=true;break} await new Promise(resolve=>setTimeout(resolve,100))} if(!ready) throw Error('Broker unavailable');
  } finally {await api.close()}
 } finally {rmSync(home,{recursive:true,force:true})}`
 function preflight(version: string) {

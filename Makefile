@@ -11,11 +11,13 @@ help:
 	@echo "make backup-age-test  Test the operator-held-key encrypted backup (Linux, needs age)"
 	@echo "make backup-age-systemd-test  Test its root and systemd path (root, staging host, needs age)"
 setup:
+	sh scripts/build-engines.sh
 	npm ci
 	npm run packages
 dev:
 	npm run dev
 verify:
+	sh scripts/build-engines.sh
 	npm run verify
 build:
 	npm run packages

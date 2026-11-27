@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { service } from './service.ts'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
@@ -9,6 +10,7 @@ const api = service(
   undefined,
   undefined,
   true,
+  { engineBin: fileURLToPath(new URL('../engine-bin/', import.meta.url)) },
 )
 await api.listen({ host: '127.0.0.1', port: Number(process.env.OPENPASSWORD_PORT || 4141) })
 console.log(
