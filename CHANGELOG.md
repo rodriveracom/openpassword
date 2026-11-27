@@ -25,7 +25,7 @@
 
 ### Human vault security and remote model custody (unreleased)
 
-- Added passkey sign-in and single-use approval bound to sensitive console requests for enrolled profiles. Changing an existing sign-in password also requires the current password.
+- Added passkey sign-in and single-use passkey approval for enrolled profiles. Approval is required by default for every console change under `/admin/` and `/profile/`; the exceptions are session handling, the approval ceremony itself, routine writes of client-encrypted private-vault data and the sealing ticket that precedes an approved connection change. Confirming an app sign-in asks for approval too. Removing a passkey discards that profile's pending approvals in all of its sessions. Changing an existing sign-in password also requires the current password.
 - Owners can share a readable item revision with a named recipient or a group using independently verified recipient cards. Group publication is atomic and roster changes withdraw prior group shares. Editing, deletion, expiry or owner revocation ends further delivery.
 - Added offline recovery kits, optional named recovery custodians, and browser unlock with a compatible user-verifying, device-bound PRF authenticator. Device enrollment expires after thirty days and can be revoked online.
 - Model connections can use a separately administered OpenPassword gateway. A scoped downstream access token replaces the provider key on the routing host. Both services enforce their own model lease. Generic operation invocation now rejects leased chat calls that must go through metering.
@@ -37,6 +37,15 @@
 - Added owner-authorized, single-use CLI deposits. The owner seals the item in the browser; the CLI submits only a five-minute receipt.
 - The release gate validates dependency publication age and the signed standalone client. Workstation updates require independently provisioned trust. Root recovery checks its installed runtime and suppresses child stderr.
 - Added cross-site mutation rejection and reauthorization of buffered model responses and streaming chunks. See SECURITY.md for trust boundaries, remaining gaps and staging tests.
+
+### Fixes since the review (unreleased)
+
+- The updater starts again the host units that systemd stops together with the broker and console, such as a reverse proxy that requires the web service. A unit that was already stopped is left alone. If one fails to start, the command fails and `--recover` retries it without stopping healthy services.
+- The CLI and MCP report why the broker refused a request, for example `Broker returned 400: Expired pairing`. Only text the broker marks as public is shown, so both the broker and the client need this version.
+- App sign-in confirmation now reaches the application: the page's content security policy blocked the redirect to the callback in Chrome. Registration refuses a callback whose host is not a domain name or IPv4 address; applications registered earlier are not re-checked.
+- Removing a passkey and discarding its pending approvals happen in one transaction.
+- **Check before upgrading:** a HubSpot issue bundle's upload folder is no longer fixed in the code. Exactly one of the connection's selected resources may begin with `/`, and it must be a valid absolute folder ending in `/` (see [issue bundles](docs/operations.md#issue-bundles-and-dispatch-controls)). A connection with no such entry, a second entry beginning with `/`, or an invalid one cannot publish issue bundles.
+- The README and operations guide say who runs each command, where, and whether it needs sudo.
 
 ### HTTP API
 

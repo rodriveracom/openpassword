@@ -1,8 +1,10 @@
 import { companyDemo, capture } from './company-demo.ts'
 import { newVaultKey, encryptPrivate, importVaultKey } from '../app/private-crypto.ts'
 import { chromium } from 'playwright-core'
-import { spawn, execFile } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { createServer as createTlsServer } from 'node:https'
+import { createHash } from 'node:crypto'
+import { spawn, execFile, execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -47,7 +49,8 @@ try {
           : [],
     })
     async function exerciseConsole() {
-      const p = await browser.newPage()
+      // The application callback below uses a throwaway self-signed certificate.
+      const p = await browser.newPage({ ignoreHTTPSErrors: true })
       await p.goto(origin)
       const cli = (command: string, input = '') =>
         new Promise<string>((resolve, reject) => {
@@ -371,6 +374,46 @@ try {
         .filter({ hasText: 'Synthetic build host' })
         .getByText('Connected', { exact: true })
         .waitFor()
+      // A real application callback on another origin, registered before step-up is required.
+      const keyFile = join(dir, 'callback.key'),
+        certFile = join(dir, 'callback.crt')
+      execFileSync(
+        'openssl',
+        [
+          ...'req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost'.split(' '),
+          '-keyout',
+          keyFile,
+          '-out',
+          certFile,
+        ],
+        { stdio: 'ignore' },
+      )
+      const answers: URL[] = []
+      const application = createTlsServer(
+        { key: readFileSync(keyFile), cert: readFileSync(certFile) },
+        (req, res) => {
+          const url = new URL(String(req.url), 'https://localhost')
+          if (url.pathname === '/callback') answers.push(url)
+          res.end('Signed in to the synthetic application')
+        },
+      )
+      application.listen(0, '127.0.0.1')
+      await once(application, 'listening')
+      // It must not keep the script alive if a later step fails.
+      application.unref()
+      const callback =
+        'https://localhost:' + (application.address() as { port: number }).port + '/callback'
+      const registered = await p.request.post(origin + '/api/admin/apps', {
+        headers: { origin },
+        data: { label: 'Synthetic application', callback, audience: 'app.example.com', days: 1 },
+      })
+      assert.equal(registered.status(), 200)
+      const { id: applicationId } = await registered.json()
+      const activated = await p.request.post(origin + '/api/admin/apps/' + applicationId, {
+        headers: { origin },
+        data: { active: true },
+      })
+      assert.equal(activated.status(), 200)
       await p.getByText('Sign-in passkeys', { exact: true }).click()
       await p.getByLabel('Passkey name').fill('Review authenticator')
       await p.getByLabel('Current sign-in password').fill('browser-only-fixture')
@@ -416,6 +459,43 @@ try {
       await p.goto(origin)
       await p.getByRole('button', { name: 'Use a passkey' }).click()
       await p.getByRole('button', { name: 'Lock workspace' }).waitFor()
+      // Consent in a real browser: passkey approval, form post, and the redirect to the other origin.
+      const verifier = 'v'.repeat(43),
+        state = 's'.repeat(43)
+      await p.goto(
+        origin +
+          '/delegate?' +
+          new URLSearchParams({
+            application_id: applicationId,
+            redirect_uri: callback,
+            state,
+            code_challenge_method: 'S256',
+            classes: '',
+            code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+          }),
+      )
+      await p.getByRole('heading', { name: 'Sign in to Synthetic application?' }).waitFor()
+      await p.getByRole('button', { name: 'Confirm sign-in' }).click()
+      await p.waitForURL((url) => url.href.startsWith(callback + '?'))
+      await p.getByText('Signed in to the synthetic application').waitFor()
+      assert.equal(answers.length, 1)
+      assert.equal(answers[0].searchParams.get('state'), state)
+      // The application's server redeems the code: no cookie and no Origin, unlike the page's requests.
+      const exchange = await fetch(origin + '/delegate/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
+          application_id: applicationId,
+          redirect_uri: callback,
+          code: answers[0].searchParams.get('code'),
+          code_verifier: verifier,
+        }),
+      })
+      assert.equal(exchange.status, 200)
+      application.closeAllConnections()
+      application.close()
+      console.log('App sign-in consent reached the callback on another origin and the code was redeemed.')
       console.log(
         'Recovery kit, passkey registration, approval challenge, authenticator-approved host and passwordless login passed.',
       )

@@ -4,7 +4,7 @@ import * as fs from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import { activate, recoverPending, snapshotStore, restoreStore, resolveDataDir, refuseHostProofDowngrade, refuseVaultDowngrade, enforcesHostProof, dependentsOf } from "../deploy/upgrade.ts"
+import { activate, recoverPending, snapshotStore, restoreStore, resolveDataDir, refuseHostProofDowngrade, refuseVaultDowngrade, enforcesHostProof, dependentsOf } from '../deploy/upgrade.ts'
 
 type Snap = { version: string | null; units: (string | null)[] }
 const old: Snap = { version: '0.3.1', units: ['old-broker', 'old-web'] }

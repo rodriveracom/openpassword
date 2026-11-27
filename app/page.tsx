@@ -1270,7 +1270,7 @@ export default function Page() {
                       : selected === 'revolut'
                         ? 'Authorized Revolut account IDs'
                         : selected === 'hubspot'
-                          ? 'Authorized template directories (end each with /)'
+                          ? 'Authorized template directories (end each with /) and, for issue bundles, one upload folder (start and end it with /)'
                           : selected === 'loops'
                             ? 'Authorized Loops list IDs'
                             : 'Authorized database tables'}{' '}

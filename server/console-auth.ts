@@ -1,3 +1,4 @@
+import { Refusal } from './refusal.ts'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes, scrypt, createHmac, timingSafeEqual, createHash } from 'node:crypto'
@@ -35,7 +36,7 @@ const services = {
 }
 const idSchema = z.enum(['google', 'github', 'apple'])
 function refuse(statusCode: number, message: string): never {
-  throw Object.assign(new Error(message), { statusCode })
+  throw new Refusal(statusCode, message)
 }
 export function consoleAuth(
   api: FastifyInstance,

@@ -1,3 +1,4 @@
+import { Refusal } from './refusal.ts'
 import { createPublicKey, randomUUID, verify } from 'node:crypto'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
@@ -29,7 +30,7 @@ export function hosts(
   }
   const initialized = !!db.prepare('SELECT 1 FROM host_policy').get()
   function deny(): never {
-    throw Object.assign(Error('Approved host required'), { statusCode: 403 })
+    throw new Refusal(403, 'Approved host required')
   }
   api.post('/admin/hosts', async (r) => {
     const s = session(r)

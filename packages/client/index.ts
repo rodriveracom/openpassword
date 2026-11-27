@@ -13,6 +13,45 @@ export type DevicePair = {
   interval_seconds: number
   expires_at: string
 }
+// The broker says why it refused in `detail`. Only a detail it marks public is passed on, as one short
+// line of printable text. The read is bounded; anything else leaves the status alone.
+async function explanation(r: Response) {
+  const reader = r.body?.getReader()
+  if (!reader) return ''
+  const stop = () => void reader.cancel().catch(() => {})
+  const timer = setTimeout(stop, 2000)
+  try {
+    const decoder = new TextDecoder()
+    let text = '',
+      size = 0
+    for (;;) {
+      const part = await reader.read()
+      if (part.done) break
+      size += part.value.length
+      if (size > 4096) return ''
+      text += decoder.decode(part.value, { stream: true })
+    }
+    const body = JSON.parse(text + decoder.decode()) as {
+      detail?: unknown
+      public?: unknown
+    } | null
+    if (body?.public !== true || typeof body.detail !== 'string') return ''
+    return body.detail
+      .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ')
+      .trim()
+      .slice(0, 200)
+  } catch {
+    return ''
+  } finally {
+    clearTimeout(timer)
+    stop()
+  }
+}
+async function refusal(r: Response) {
+  const detail = await explanation(r)
+  const message = 'Broker returned ' + r.status + (detail ? ': ' + detail : '')
+  return Object.assign(Error(message), { status: r.status })
+}
 export class OpenPassword {
   readonly origin: string
   constructor(
@@ -65,16 +104,11 @@ export class OpenPassword {
     if (r.headers.get('openpassword-protocol-version') !== '1')
       throw Object.assign(Error('Broker protocol unavailable'), { status: r.status })
     if (!r.ok) {
-      const expired =
-        path === '/v1/device/token' &&
-        r.status === 400 &&
-        (await r.json().catch(() => null))?.detail === 'Expired pairing'
-      throw Object.assign(
-        Error(
-          expired ? 'Pairing expired. Start a new pairing request.' : 'Broker returned ' + r.status,
-        ),
-        { status: r.status },
-      )
+      const error = await refusal(r)
+      // A pairing that ran out gets its own instruction.
+      if (path === '/v1/device/token' && error.message === 'Broker returned 400: Expired pairing')
+        error.message = 'Pairing expired. Start a new pairing request.'
+      throw error
     }
     return r.status === 204 ? (undefined as T) : ((await r.json()) as T)
   }
@@ -100,7 +134,7 @@ export class OpenPassword {
     })
     if (r.headers.get('openpassword-protocol-version') !== '1')
       throw Object.assign(Error('Broker protocol unavailable'), { status: r.status })
-    if (!r.ok) throw Object.assign(Error('Broker returned ' + r.status), { status: r.status })
+    if (!r.ok) throw await refusal(r)
     return new Uint8Array(await r.arrayBuffer())
   }
   chat(model: string, prompt: string, maxTokens: number, key: string) {

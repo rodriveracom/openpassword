@@ -1,3 +1,4 @@
+import { Refusal } from './refusal.ts'
 import type { DatabaseSync } from 'node:sqlite'
 
 export type Audience = { tenant: string; actor?: string }
@@ -51,7 +52,7 @@ export function activity(db: DatabaseSync, journal = false) {
       const k = key(scope)
       const group = waiting.get(k) ?? new Set<() => void>()
       if (count >= 4096 || group.size >= 512)
-        throw Object.assign(Error('Activity listener limit reached'), { statusCode: 429 })
+        throw new Refusal(429, 'Activity listener limit reached')
       await new Promise<void>((resolve) => {
         function wake() {
           clearTimeout(timer)
@@ -68,7 +69,7 @@ export function activity(db: DatabaseSync, journal = false) {
         count++
       })
       if (key(authorize()) !== k)
-        throw Object.assign(Error('Workspace changed'), { statusCode: 409 })
+        throw new Refusal(409, 'Workspace changed')
       return read(scope, after)
     },
   }

@@ -130,9 +130,16 @@ export function passkeys(
   api.delete('/profile/passkeys/:id', async (r) => {
     const { id } = z.object({ id: z.string() }).parse(r.params),
       p = user(session(r))
-    if (!db.prepare('DELETE FROM passkeys WHERE profile=? AND id=?').run(p, id).changes) fail()
-    // An approval given with a retired credential must not outlive it.
-    discardPending(db, p)
+    // An approval given with a retired credential must not outlive it, so both go or neither does.
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      if (!db.prepare('DELETE FROM passkeys WHERE profile=? AND id=?').run(p, id).changes) fail()
+      discardPending(db, p)
+      db.exec('COMMIT')
+    } catch (e) {
+      db.exec('ROLLBACK')
+      throw e
+    }
     return { ok: true }
   })
   const authOptions = (p?: string) =>

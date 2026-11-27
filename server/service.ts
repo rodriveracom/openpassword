@@ -1,4 +1,5 @@
 import { engines, claimEngineOwner } from './engines.ts'
+import { Refusal } from './refusal.ts'
 import { isIP } from 'node:net'
 import { httpContract } from './http-contract.ts'
 import { personalVault } from './personal-vault.ts'
@@ -6,7 +7,7 @@ import { hosts } from './hosts.ts'
 import releasePackage from '../package.json' with { type: 'json' }
 import { activity } from './activity.ts'
 import { consoleAuth } from './console-auth.ts'
-import { issueFiles, issueFolder, bundleOperation } from './issue-files.ts'
+import { issueFiles, uploadFolder, bundleOperation } from './issue-files.ts'
 import { templatePlan, writeTemplate } from './template.ts'
 import { templateOps } from './template-preview.ts'
 import { approvalSnapshot, snapshotDigest } from './snapshot.ts'
@@ -36,7 +37,7 @@ import { connectionInput, invocation, name } from '../packages/schemas/index.ts'
 import { store, digest, opaque } from './store.ts'
 
 const fail = (statusCode: number, message: string): never => {
-  throw Object.assign(Error(message), { statusCode })
+  throw new Refusal(statusCode, message)
 }
 const now = () => Date.now(),
   iso = (n: number) => new Date(n).toISOString()
@@ -241,7 +242,7 @@ function createService(
         .code(503)
         .header('Retry-After', '1')
         .header('OpenPassword-Protocol-Version', '1')
-        .send({ detail: 'Broker is updating' })
+        .send({ detail: 'Broker is updating', public: true })
     inFlight++
     const finish = () => {
       reply.raw.off('close', finish)
@@ -639,6 +640,8 @@ function createService(
           : err instanceof z.ZodError
             ? 'Invalid input'
             : err.message,
+      // Clients show agents only a detail marked public.
+      ...(err instanceof Refusal && status < 500 ? { public: true } : {}),
     })
   })
   api.addHook('onClose', async () => {
@@ -2169,16 +2172,17 @@ function createService(
     const resources = JSON.parse(
       get('SELECT labels FROM resources WHERE conn=?', c.id)?.labels ?? '[]',
     )
+    const folder = uploadFolder(resources)
     if (
       connection !== c.id ||
       c.provider !== 'hubspot' ||
       !c.active ||
       !JSON.parse(g.ops).includes(bundleOperation) ||
-      !resources.includes(issueFolder)
+      !folder
     )
       fail(403, 'Issue publication unavailable')
     checkDispatch(g.tenant, c.provider, bundleOperation)
-    return { tenant: g.tenant, actor: g.id, conn: c.id, revision: c.revision }
+    return { tenant: g.tenant, actor: g.id, conn: c.id, revision: c.revision, folder: folder! }
   }
   api.addContentTypeParser(
     ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
@@ -2460,11 +2464,11 @@ function createService(
           effect && !reserve ? 'pending' : 'running',
           seal(
             (() => {
-              if (bundle)
+              if (scope && bundle)
                 return {
                   schema: 'hubspot-issue/1',
                   ...bundle,
-                  folder: issueFolder + bundle.issue_id,
+                  folder: scope.folder + bundle.issue_id,
                 }
               const snapshot = approvalSnapshot(a.id, b.arguments, {
                 device_id: g.id,

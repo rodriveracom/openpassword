@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { service } from '../server/service.ts'
 import { discardPending } from '../server/passkeys.ts'
+import { formTarget } from '../server/delegation.ts'
 for (const action of [false, true])
   test(
     action
@@ -174,6 +175,11 @@ test('consent to a new grant needs a passkey approval once one is enrolled', asy
   const jump = new URL(String((await api.inject({ url: '/delegate?' + q })).headers.location)),
     page = await api.inject({ url: jump.pathname + jump.search, headers: h })
   assert.match(String(page.headers['content-security-policy']), /script-src 'nonce-/)
+  // The confirmation redirects to the application, so its origin and no other is an allowed target.
+  assert.match(
+    String(page.headers['content-security-policy']),
+    /; form-action 'self' https:\/\/app\.example\.invalid;/,
+  )
   const approval_id = /name="approval_id" value="([^"]+)"/.exec(page.body)![1],
     csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1],
     attempt = jump.searchParams.get('attempt')
@@ -194,4 +200,44 @@ test('consent to a new grant needs a passkey approval once one is enrolled', asy
   add.run('b', 'proof', 'other-session', '', '', Date.now() + 60000)
   discardPending(db, 'owner')
   assert.deepEqual(db.prepare('SELECT id FROM pk_attempts').all().map((r) => r.id), ['b'])
+})
+
+test('only a plain callback origin is added as a form target', () => {
+  assert.equal(formTarget('https://app.example.com/callback'), ' https://app.example.com')
+  assert.equal(formTarget('https://App.Example.com:8443/a/b'), ' https://app.example.com:8443')
+  assert.equal(formTarget('https://app.example.com:443/callback'), ' https://app.example.com')
+  for (const callback of [
+    "https://a;script-src.example.com/callback",
+    "https://a'b.example.com/callback",
+    'https://a,b.example.com/callback',
+    'https://*.example.com/callback',
+    'https://[::1]/callback',
+    'http://app.example.com/callback',
+  ])
+    assert.equal(formTarget(callback), '', callback)
+})
+
+test('an application whose callback the confirmation page cannot reach is not registered', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'op-callback-host-')),
+    api = service(dir)
+  t.after(async () => {
+    await api.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  const login = await api.inject({
+    url: '/admin/login',
+    method: 'POST',
+    payload: { token: readFileSync(join(dir, 'operator.token'), 'utf8') },
+  })
+  const cookie = String(login.headers['set-cookie']).split(';')[0]
+  const register = (callback: string) =>
+    api.inject({
+      url: '/admin/apps',
+      method: 'POST',
+      headers: { cookie },
+      payload: { label: 'Example', callback, audience: 'app.example.com', days: 1 },
+    })
+  for (const callback of ['https://[::1]/callback', 'https://my_app.example.com/callback'])
+    assert.equal((await register(callback)).statusCode, 422, callback)
+  assert.equal((await register('https://app.example.com:8443/callback')).statusCode, 200)
 })

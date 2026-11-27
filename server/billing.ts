@@ -1,3 +1,4 @@
+import { Refusal } from './refusal.ts'
 import type { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
 const integer = z.number().int().nonnegative().max(1000000000)
@@ -119,7 +120,7 @@ export function billing(db: DatabaseSync) {
           )
           .run(amount, id, amount).changes
       )
-        throw Object.assign(Error('Model budget exhausted'), { statusCode: 402 })
+        throw new Refusal(402, 'Model budget exhausted')
       db.prepare("INSERT INTO model_charges VALUES(?,?,?,NULL,'reserved',?)").run(
         ex,
         id,

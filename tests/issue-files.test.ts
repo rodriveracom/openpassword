@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { service } from '../server/service.ts'
 import { digest } from '../server/store.ts'
-import { bundleOperation, issueFolder } from '../server/issue-files.ts'
+import { bundleOperation, uploadFolder } from '../server/issue-files.ts'
 
 test('HubSpot issue stages bound images, approves once, substitutes the returned URL and preserves partial receipts across restart', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'op-issue-'))
@@ -20,7 +20,7 @@ test('HubSpot issue stages bound images, approves once, substitutes the returned
     if (String(url).includes('/files/v3/files')) {
       uploads++
       if (reject) return new Response(null, { status: 429 })
-      assert.equal(form.get('folderPath'), '/rasa-newsletter/issue-one')
+      assert.equal(form.get('folderPath'), '/example-assets/issue-one')
       assert.equal((form.get('file') as Blob).size, bytes.length)
       return Response.json({ id: '42', url: assetURL })
     }
@@ -70,7 +70,7 @@ test('HubSpot issue stages bound images, approves once, substitutes the returned
       label: 'Test portal',
       external_identity: '6711345',
       secret: 'example',
-      resources: [issueFolder, 'news/'],
+      resources: ['/example-assets/', 'news/'],
     })
   ).json().connection_id
   const pair = (await req('POST', '/v1/device/authorizations', { device_name: 'Publisher' })).json()
@@ -108,6 +108,11 @@ test('HubSpot issue stages bound images, approves once, substitutes the returned
   const pending = (await req('POST', url, body)).json()
   assert.equal(pending.status, 'approval_required')
   assert.equal(uploads, 0)
+  // The approver is shown the folder the dispatch below uploads to.
+  const shown = (await req('GET', '/admin/workspace'))
+    .json()
+    .approvals.find((a: { id: string }) => a.id === pending.execution_id)
+  assert.equal(shown.preview.folder, '/example-assets/issue-one')
   await req('POST', '/admin/approvals/' + pending.execution_id, { approve: true })
   const result = (await req('POST', url, body)).json()
   assert.equal(result.result?.state, 'complete', JSON.stringify(result))
@@ -128,4 +133,24 @@ test('HubSpot issue stages bound images, approves once, substitutes the returned
   assert.equal(partial.status, 'ambiguous')
   assert.equal(partial.receipt.issue_bundle.files[0].state, 'refused')
   assert.equal(templates, 1)
+})
+
+test('the upload folder is the one absolute folder among the selected resources', () => {
+  assert.equal(uploadFolder(['news/', '/example-assets/']), '/example-assets/')
+  assert.equal(uploadFolder(['/team/news_2.0/']), '/team/news_2.0/')
+  for (const resources of [
+    [],
+    ['news/'],
+    ['/one/', '/two/'],
+    ['/'],
+    ['/no-trailing-slash'],
+    ['//double/'],
+    ['/up/../'],
+    ['/.hidden/'],
+    ['/with space/'],
+    ['/a/b/c/d/e/f/'],
+    '/not-a-list/',
+    null,
+  ])
+    assert.equal(uploadFolder(resources), null, JSON.stringify(resources))
 })
