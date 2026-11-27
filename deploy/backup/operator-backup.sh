@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OpenPassword backups: the operator's one script. Run it on YOUR OWN computer. It never connects to a server.
+# OpenPassword backups: the operator's one script. Run it on YOUR OWN computer. Managed jobs fetch encrypted snapshots over SSH.
 #
 # RUN it as a file, never paste it into the terminal (it uses set -e and exit, which would close a pasted session):
 #   bash operator-backup.sh init               once: create your key pair and show the one public line to hand over
@@ -101,7 +101,8 @@ JS
 }
 
 case "${1:-}" in
+  new|resume|status) exec node "$here/job.ts" "$@" ;;
   init) init ;;
   check) shift; check "${1:-}" ;;
-  *) say "usage: bash $0 init | check FILE.age   (run it as a file; never paste it into the terminal)"; exit 2 ;;
+  *) say "usage: bash $0 init | check FILE.age | new HOST DESTINATION | resume JOB | status JOB   (run it as a file; never paste it into the terminal)"; exit 2 ;;
 esac

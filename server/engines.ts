@@ -20,6 +20,45 @@ export function engines(
   for (const binary of ['ephemeral', 'dostoevsky-gateway'])
     accessSync(join(bin, binary), constants.X_OK)
   installEngineSchema(db)
+  // Connection-local triggers are hints only. The committed outbox survives rollback,
+  // external writers and restarts. Every wait also has a fallback deadline.
+  function hint(name: string, table: string, changes: string[]) {
+    let notify: (() => void) | undefined
+    let pending = false
+    const wake = () => {
+      pending = true
+      notify?.()
+    }
+    db.function(name, () => {
+      wake()
+      return null
+    })
+    for (const op of changes)
+      db.exec(
+        `CREATE TEMP TRIGGER ${name}_${op} AFTER ${op} ON main.${table} BEGIN SELECT ${name}(); END`,
+      )
+    return {
+      wake,
+      wait: (ms: number) =>
+        new Promise<void>((resolve) => {
+          if (pending) {
+            pending = false
+            resolve()
+            return
+          }
+          const finish = () => {
+            pending = false
+            clearTimeout(timer)
+            notify = undefined
+            resolve()
+          }
+          const timer = setTimeout(finish, ms)
+          notify = finish
+        }),
+    }
+  }
+  const streamHint = hint('stream_hint', 'engine_events', ['INSERT'])
+  const flowHint = hint('flow_hint', 'engine_jobs', ['INSERT', 'UPDATE'])
   let stopped = false
   let shutdownStream = () => {}
   let shutdownWorker = () => {}
@@ -30,9 +69,9 @@ export function engines(
     const dir = mkdtempSync(join(tmpdir(), 'openpassword-stream-'))
     const token = randomBytes(32).toString('base64url')
     const child = spawn(
-      process.execPath,
+      '/bin/sh',
       [
-        fileURLToPath(new URL('./engine-guardian.ts', import.meta.url)),
+        fileURLToPath(new URL('./engine-guardian.sh', import.meta.url)),
         'stream',
         dir,
         join(bin, 'dostoevsky-gateway'),
@@ -53,7 +92,7 @@ export function engines(
     shutdownStream = () => child.stdin.end()
     let active = true
     const batch = db.prepare(
-      'SELECT seq,kind,source FROM engine_events WHERE seq>? ORDER BY seq LIMIT 64',
+      'SELECT seq,kind,source FROM engine_events WHERE seq>? ORDER BY seq LIMIT ?',
     )
     const ack = db.prepare('DELETE FROM engine_events WHERE seq=?')
     const advance = db.prepare('UPDATE engine_cursor SET visible=MAX(visible,?) WHERE id=1')
@@ -67,52 +106,73 @@ export function engines(
         received = 0
       streamHealthy = true
       // One upstream long poll fans out to authorization-scoped subscribers.
+      function encode(rows: ReturnType<typeof batch.all>) {
+        return JSON.stringify(
+          rows.map((row) => {
+            if (!['activity', 'usage', 'meter'].includes(String(row.kind)))
+              throw Error('Invalid event class')
+            return [Number(row.seq), row.kind]
+          }),
+        )
+      }
       const read = async () => {
         for (let offset = 0n; active && !stopped && received < 8192; ) {
-          const record = await client.read('events', 0, offset, 1000)
+          const record = await client.read('events', 0, offset, 10000)
           if (!record) continue
-          const row = db
-            .prepare('SELECT seq,kind,source FROM engine_events WHERE seq=?')
-            .get(Number(record.id))
+          const bytes = new TextDecoder().decode(record.value)
+          const entries: unknown = JSON.parse(bytes)
           if (
-            !row ||
-            record.offset !== offset ||
-            new TextDecoder().decode(record.value) !== row.kind
+            !Array.isArray(entries) ||
+            !entries.length ||
+            entries.length > 64 ||
+            record.offset !== offset
+          )
+            throw Error('Invalid stream batch')
+          const rows = batch.all(0, entries.length)
+          if (
+            record.id !== String(rows[0]?.seq) ||
+            bytes !== encode(rows) ||
+            rows.length !== entries.length
           )
             throw Error('Stream receipt mismatch')
+          const audiences = new Map<string, [string, string]>()
           db.exec('BEGIN IMMEDIATE')
           try {
-            if (row.kind === 'activity') advance.run(row.source)
-            ack.run(row.seq)
+            for (const row of rows) {
+              if (row.kind === 'activity') {
+                advance.run(row.source)
+                const audience = scope.get(row.source)
+                if (audience) {
+                  const pair: [string, string] = [String(audience.tenant), String(audience.actor)]
+                  audiences.set(JSON.stringify(pair), pair)
+                }
+              }
+              ack.run(row.seq)
+            }
             db.exec('COMMIT')
           } catch (error) {
             db.exec('ROLLBACK')
             throw error
           }
-          if (row.kind === 'activity') {
-            const audience = scope.get(row.source)
-            if (audience) wake(String(audience.tenant), String(audience.actor))
-          }
-          received++
+          for (const pair of audiences.values()) wake(...pair)
+          received += rows.length
+          if (received === 8192) streamHint.wake()
           offset++
         }
       }
       const publish = async () => {
         let cursor = 0
         while (active && !stopped && received < 8192) {
-          const rows = sent < 8192 ? batch.all(cursor) : []
+          const rows = sent < 8192 ? batch.all(cursor, Math.min(64, 8192 - sent)) : []
           if (!rows.length) {
-            await sleep(25)
+            await streamHint.wait(1000)
             continue
           }
-          for (const row of rows) {
-            if (!active || stopped || sent === 8192) break
-            await client.publish('events', new TextEncoder().encode(String(row.kind)), {
-              id: String(row.seq),
-            })
-            cursor = Number(row.seq)
-            sent++
-          }
+          await client.publish('events', new TextEncoder().encode(encode(rows)), {
+            id: String(rows[0].seq),
+          })
+          cursor = Number(rows.at(-1)!.seq)
+          sent += rows.length
         }
       }
       const readers = read(),
@@ -176,7 +236,14 @@ export function engines(
         }
         const task = await cli.call({ op: 'poll', queue: 'work', leaseMS: 10000 })
         if (!task) {
-          if (!jobs.length && !ready.length) await sleep(200)
+          if (!jobs.length && !ready.length) {
+            const next = db
+              .prepare('SELECT MIN(due) AS due FROM engine_jobs WHERE ready=0 AND due IS NOT NULL')
+              .get()?.due
+            await flowHint.wait(
+              Math.max(1, Math.min(1000, next == null ? 1000 : Number(next) - Date.now())),
+            )
+          }
           continue
         }
         const j = db.prepare('SELECT * FROM engine_jobs WHERE id=?').get(task.Run)
@@ -250,6 +317,8 @@ export function engines(
     healthy: () => streamHealthy && workerHealthy,
     async close() {
       stopped = true
+      streamHint.wake()
+      flowHint.wake()
       shutdownStream()
       shutdownWorker()
       await Promise.all(tasks)

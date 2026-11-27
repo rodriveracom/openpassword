@@ -31,6 +31,7 @@ try {
           return [
             {
               pid: Number(p),
+              name: readFileSync('/proc/' + p + '/comm', 'utf8').trim(),
               parent: Number(stat[1]),
               ticks: Number(stat[11]) + Number(stat[12]),
               rss: Number(stat[21]),
@@ -43,13 +44,7 @@ try {
     const family = new Set([broker.pid])
     for (let i = 0; i < 4; i++)
       for (const row of rows) if (family.has(row.parent)) family.add(row.pid)
-    return rows
-      .filter((r) => family.has(r.pid))
-      .reduce((s, r) => ({ ticks: s.ticks + r.ticks, rss: s.rss + r.rss, count: s.count + 1 }), {
-        ticks: 0,
-        rss: 0,
-        count: 0,
-      })
+    return rows.filter((r) => family.has(r.pid))
   }
   await sleep(500)
   const before = sample(),
@@ -59,10 +54,15 @@ try {
     elapsed = performance.now() - start
   console.log(
     JSON.stringify({
-      processes: after.count,
+      processes: after.length,
       idle_window_ms: Math.round(elapsed),
-      cpu_ms: ((after.ticks - before.ticks) * 1000) / Number(execFileSync('getconf', ['CLK_TCK'])),
-      summed_rss_mib: (after.rss * Number(execFileSync('getconf', ['PAGESIZE']))) / 1048576,
+      per_process: after.map((r) => ({
+        name: r.name,
+        cpu_ms:
+          ((r.ticks - (before.find((p) => p.pid === r.pid)?.ticks ?? r.ticks)) * 1000) /
+          Number(execFileSync('getconf', ['CLK_TCK'])),
+        rss_mib: (r.rss * Number(execFileSync('getconf', ['PAGESIZE']))) / 1048576,
+      })),
     }),
   )
   const cli = new EngineCli(join(process.cwd(), 'engine-bin/ephemeral'), join(home, 'bench.sqlite'))

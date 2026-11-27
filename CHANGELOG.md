@@ -2,6 +2,14 @@
 
 ## 0.5.0 candidate — durable activity and workflows
 
+### Stream delivery and recoverable operator backups
+
+- Batches up to 64 ordered event references in one journal record. Broker writes wake the publisher and workflow scheduler. Lightweight shell supervisors release engine processes on broker exit.
+- Adds operator-side backup jobs with durable progress, resumable encrypted delivery, checksums, and a restore check using the operator’s key. See [engine operations](docs/engine-operations.md).
+- Adds a 60-agent streaming workload, per-process idle measurements, and backup interruption cases to native acceptance.
+
+### Initial engine integration
+
 - The console and CLI now read activity carried by a private Dostoevsky gateway. Existing activity cursors survive restarts. Usage and metering transitions have a transactional delivery queue.
 - Ephemeral drives enrollment expiry, approval decisions, revocation and credential-rotation propagation, the backup snapshot step, and offline rotation of the vault wrapping key.
 - The local client can retry a lost device-token response. An expired pairing now reports the reason to the operator.

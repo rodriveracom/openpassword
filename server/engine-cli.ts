@@ -6,10 +6,10 @@ export class EngineCli {
   private lines
   constructor(binary: string, database: string, epochDir?: string) {
     this.child = spawn(
-      epochDir ? process.execPath : binary,
+      epochDir ? '/bin/sh' : binary,
       epochDir
         ? [
-            fileURLToPath(new URL('./engine-guardian.ts', import.meta.url)),
+            fileURLToPath(new URL('./engine-guardian.sh', import.meta.url)),
             'workflow',
             epochDir,
             binary,

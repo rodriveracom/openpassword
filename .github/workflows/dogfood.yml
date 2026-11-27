@@ -21,3 +21,12 @@ jobs:
           go-version: 1.26.2
           cache: false
       - run: npm ci && make verify
+      - name: Streaming load with worker restart
+        run: node --import tsx scripts/agent-load.ts
+      - name: Install age for backup acceptance
+        run: go install filippo.io/age/cmd/...@v1.2.1
+      - name: Backup interruption and restore verification
+        run: bash scripts/backup-job-test.sh
+      - name: Idle CPU and resident memory per process
+        if: runner.os == 'Linux'
+        run: node --import tsx scripts/engine-cost.ts
