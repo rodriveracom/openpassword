@@ -755,6 +755,25 @@ function createService(
       before,
     )
   })
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS team_item_access ON events(tenant,subject,id DESC) WHERE action='Vault item revealed' AND actor!='owner'",
+  )
+  api.get('/admin/team-overview', async (r) => {
+    const s = session(r)
+    if (s.role !== 'owner') fail(403, 'Owner required')
+    const item = get('SELECT id,title FROM items WHERE tenant=? ORDER BY rowid LIMIT 1', s.tenant)
+    if (!item) return { item: null, access: null }
+    const access = get(
+      `SELECT e.id,i.id AS item,i.title,m.label AS member,e.at
+       FROM events e JOIN items i ON i.id=e.subject AND i.tenant=e.tenant
+       JOIN members m ON m.id=e.actor AND m.tenant=e.tenant
+       WHERE e.tenant=? AND e.subject=? AND e.action='Vault item revealed' AND e.actor!='owner'
+       ORDER BY e.id DESC LIMIT 1`,
+      s.tenant,
+      item.id,
+    )
+    return { item, access: access ?? null }
+  })
   api.post('/admin/items', async (r) => {
     const s = session(r),
       b = z

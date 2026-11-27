@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — company onboarding
+
+- First administrators choose local or remote setup, confirm installation control with a CLI code, and land in Team overview.
+- Owners can save a shared login, issue a workspace member token, and follow a real teammate reveal to item history. The same screen supports offboarding.
+- Added a repeatable two-browser company demonstration with synthetic credentials and a presenter guide.
+
 ## 0.5.0 candidate — durable activity and workflows
 
 ### Stream delivery and recoverable operator backups

@@ -391,7 +391,11 @@ function Detail({
     } catch (e) {
       if (ticket === epoch.current) {
         V(null)
-        M((e as Error).message)
+        const failure = e as Error & { status?: number }
+        if (failure.status === 401 || failure.status === 403) {
+          I(undefined)
+          E(failure.message)
+        } else M(failure.message)
       }
     } finally {
       if (ticket === epoch.current) S(false)

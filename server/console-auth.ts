@@ -453,7 +453,7 @@ export function consoleAuth(
         if (!identity) throw Error('Unlinked identity')
         signIn(reply, String(identity.id))
       }
-      return reply.redirect(t.session ? '/?signin=linked' : '/')
+      return reply.redirect(t.session === 'setup' ? '/team' : t.session ? '/?signin=linked' : '/')
     } catch {
       return reply.redirect('/?signin=failed')
     }

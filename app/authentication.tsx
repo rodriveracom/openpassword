@@ -14,7 +14,12 @@ export function ConsoleLogin({
   const [member, setMember] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('')
+  const [code, setCode] = useState(''),
+    [account, setAccount] = useState(false),
+    [remote, setRemote] = useState(false),
+    [system, setSystem] = useState(false)
   useEffect(() => {
+    setMember(new URLSearchParams(location.search).get('member') === '1')
     request('auth/status')
       .then(setStatus)
       .catch((e) => setError(e.message))
@@ -28,7 +33,11 @@ export function ConsoleLogin({
     setError('')
     try {
       if (member) await request('admin/login', data)
-      else await request(status?.setup ? 'auth/setup' : 'auth/password', data)
+      else
+        await request(
+          status?.setup ? 'auth/setup' : 'auth/password',
+          status?.setup ? { ...data, token: code } : data,
+        )
       await done(!!status?.setup && !member)
     } catch (e) {
       setError((e as Error).message)
@@ -41,7 +50,9 @@ export function ConsoleLogin({
     <section className="loginForm">
       <h1>
         {setup
-          ? 'Create your administrator account'
+          ? account
+            ? 'Create your administrator account'
+            : 'Set up your team vault'
           : member
             ? 'Workspace member sign-in'
             : 'Sign in to OpenPassword'}
@@ -55,85 +66,148 @@ export function ConsoleLogin({
       ) : (
         status && (
           <>
-            <form onSubmit={submit} key={String(setup) + String(member)}>
-              {!setup && !member && (
-                <button
-                  disabled={busy}
-                  onClick={async () => {
-                    setBusy(true)
-                    try {
-                      const { id, options } = await request('auth/passkey/begin', {})
-                      await request('auth/passkey/finish', {
-                        id,
-                        response: await usePasskey(options),
-                      })
-                      await done(false)
-                    } catch {
-                      setError('Passkey sign-in did not complete.')
-                    } finally {
-                      setBusy(false)
-                    }
-                  }}
-                >
-                  Use a passkey
-                </button>
-              )}
-              {setup && (
-                <p>
-                  Use the setup code from the machine running OpenPassword. This account will manage
-                  your workspace.
-                </p>
-              )}
-              {(setup || member) && (
+            {setup && !account ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  setAccount(true)
+                  setError('')
+                }}
+              >
+                <p>First, confirm you manage this installation. Where is OpenPassword running?</p>
+                <div className="setupChoice">
+                  {['On this computer', 'On a remote server'].map((label, i) => (
+                    <button
+                      type="button"
+                      key={label}
+                      aria-pressed={remote === !!i}
+                      onClick={() => {
+                        setRemote(!!i)
+                        setSystem(!!i)
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <label>
-                  {member ? 'Workspace access token' : 'Setup code'}
-                  <input required type="password" name="token" autoComplete="off" />
+                  Installation type
+                  <select
+                    value={system ? 'system' : 'user'}
+                    onChange={(e) => setSystem(e.target.value === 'system')}
+                  >
+                    <option value="user">User installation</option>
+                    <option value="system">Systemd service</option>
+                  </select>
                 </label>
-              )}
-              {setup && (
-                <details>
-                  <summary>Where do I find the setup code?</summary>
+                <p>
+                  {remote
+                    ? 'On your computer, run this with the OpenPassword CLI. Replace user@host with your trusted SSH account.'
+                    : system
+                      ? 'On the deployment host, run this as the deployment operator.'
+                      : 'In a terminal on this computer, run this as the user who started OpenPassword.'}{' '}
+                  {system
+                    ? 'The service installation requires sudo on the deployment host.'
+                    : 'No sudo is needed.'}
+                </p>
+                <code className="setupCommand">
+                  {remote
+                    ? 'openpassword setup-code --ssh user@host' + (system ? '' : ' --user')
+                    : system
+                      ? 'sudo cat /var/lib/openpassword/operator.token | /opt/openpassword/current/node/bin/node /opt/openpassword/current/public/openpassword-cli.cjs setup-code --operator-stdin'
+                      : 'openpassword setup-code'}
+                </code>
+                <label>
+                  Setup code
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    required
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                  />
+                </label>
+                <small>Paste the code printed by the CLI. It expires after ten minutes.</small>
+                <button className="primary">Continue to account</button>
+              </form>
+            ) : (
+              <form onSubmit={submit} key={String(setup) + String(member)}>
+                {!setup && !member && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      try {
+                        const { id, options } = await request('auth/passkey/begin', {})
+                        await request('auth/passkey/finish', {
+                          id,
+                          response: await usePasskey(options),
+                        })
+                        await done(false)
+                      } catch {
+                        setError('Passkey sign-in did not complete.')
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    Use a passkey
+                  </button>
+                )}
+                {setup && (
                   <p>
-                    On your laptop, run <code>openpassword setup-code --ssh user@host</code>. Use
-                    your deployment’s trusted SSH host or alias. For a user installation, append{' '}
-                    <code>--user</code>.
+                    This account manages people and shared logins in your workspace.{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccount(false)
+                        setError('')
+                      }}
+                    >
+                      Change setup code
+                    </button>
                   </p>
-                  <p>
-                    On the deployment host itself, a user installation can run{' '}
-                    <code>openpassword setup-code</code>. Enter the ten-minute code here. After
-                    sign-in, open Workspace → CLI hosts and issue a host enrollment token. Paste it
-                    into <code>openpassword host connect</code> on the agent machine. Each agent
-                    then requests its own grant.
-                  </p>
-                </details>
-              )}
-              {!member && (
-                <>
+                )}
+                {member && (
                   <label>
-                    Username
-                    <input name="username" autoComplete="username" maxLength={80} required />
+                    Workspace access token
+                    <input required type="password" name="token" autoComplete="off" />
                   </label>
-                  <label>
-                    {setup ? 'Choose a password (12 characters minimum)' : 'Password'}
-                    <input
-                      type="password"
-                      name="password"
-                      minLength={setup ? 12 : 1}
-                      maxLength={256}
-                      autoComplete={setup ? 'new-password' : 'current-password'}
-                      required
-                    />
-                  </label>
-                </>
-              )}
-              <button className="primary" disabled={busy}>
-                {setup ? 'Create administrator' : 'Sign in'}
-              </button>
-            </form>
-            {setup && (
+                )}
+                {!member && (
+                  <>
+                    <label>
+                      Username
+                      <input name="username" autoComplete="username" maxLength={80} required />
+                    </label>
+                    <label>
+                      {setup ? 'Choose a password (12 characters minimum)' : 'Password'}
+                      <input
+                        type="password"
+                        name="password"
+                        minLength={setup ? 12 : 1}
+                        maxLength={256}
+                        autoComplete={setup ? 'new-password' : 'current-password'}
+                        required
+                      />
+                    </label>
+                  </>
+                )}
+                <button className="primary" disabled={busy}>
+                  {setup ? 'Create administrator' : 'Sign in'}
+                </button>
+              </form>
+            )}
+            {setup && account && (
               <details>
                 <summary>Create administrator with social sign-in</summary>
-                <BootstrapSocial request={request} origin={status.origin} error={setError} />
+                <BootstrapSocial
+                  code={code}
+                  request={request}
+                  origin={status.origin}
+                  error={setError}
+                />
               </details>
             )}
             {!setup &&
@@ -155,14 +229,16 @@ export function ConsoleLogin({
                   Continue with {labels[p]}
                 </button>
               ))}
-            <button
-              onClick={() => {
-                setMember(!member)
-                setError('')
-              }}
-            >
-              {member ? 'Administrator sign-in' : 'Use a workspace access token'}
-            </button>
+            {!status.setup && (
+              <button
+                onClick={() => {
+                  setMember(!member)
+                  setError('')
+                }}
+              >
+                {member ? 'Administrator sign-in' : 'Use a workspace access token'}
+              </button>
+            )}
           </>
         )
       )}
@@ -280,12 +356,14 @@ export function Authentication({ request }: { request: Request }) {
 }
 
 function BootstrapSocial({
+  code,
   request,
   origin,
   error,
 }: {
   request: Request
   origin: string
+  code: string
   error: (m: string) => void
 }) {
   const [provider, P] = useState('google')
@@ -296,7 +374,12 @@ function BootstrapSocial({
         const setup = Object.fromEntries(new FormData(e.currentTarget))
         try {
           location.assign(
-            (await request('auth/' + provider + '/start', { link: false, setup })).url,
+            (
+              await request('auth/' + provider + '/start', {
+                link: false,
+                setup: { ...setup, token: code },
+              })
+            ).url,
           )
         } catch (ex) {
           error((ex as Error).message)
@@ -319,10 +402,6 @@ function BootstrapSocial({
         value={origin + '/api/auth/' + provider + '/callback'}
         readOnly
       />
-      <label>
-        Installation setup code
-        <input name="token" type="password" required />
-      </label>
       <label>
         {provider === 'apple' ? 'Services ID' : 'OAuth client ID'}
         <input name="client" required />

@@ -1,4 +1,5 @@
 'use client'
+import { TeamOverview } from './team-overview'
 import { PrivateVault } from './private-vault'
 import { HostDirectory } from './host-directory'
 import { usePasskey } from './passkeys-client'
@@ -91,6 +92,7 @@ type Workspace = {
   events: { action: string; subject: string; at: number; actor: string }[]
 }
 const tabs = [
+  ['Team overview', Building2],
   ['Vault items', LockKeyhole],
   ['Private vault', LockKeyhole],
   ['Connections', Vault],
@@ -103,6 +105,7 @@ const tabs = [
 ] as const
 type Tab = (typeof tabs)[number][0]
 const paths: Record<Tab, string> = {
+  'Team overview': '/team',
   Connections: '/connections',
   Integrations: '/integrations',
   'Access grants': '/grants',
@@ -184,8 +187,11 @@ function Brand() {
 export default function Page() {
   const pathname = usePathname()
   const [navigation, setNavigation] = useState(false)
+  const [w, W] = useState<Workspace | null>(null)
   const tab =
-    pathname === '/' || pathname.startsWith('/vault/')
+    pathname === '/' ||
+    pathname.startsWith('/vault/') ||
+    (pathname === '/team' && w && w.role !== 'owner')
       ? 'Vault items'
       : (tabs.find(([t]) => paths[t] === pathname)?.[0] ??
         (pathname === '/device'
@@ -193,8 +199,7 @@ export default function Page() {
           : pathname.startsWith('/approvals/')
             ? 'Approvals'
             : 'Connections'))
-  const [w, W] = useState<Workspace | null>(null),
-    [busy, B] = useState(false),
+  const [busy, B] = useState(false),
     [err, E] = useState(''),
     [q, Q] = useState(''),
     [modal, M] = useState(''),
@@ -214,9 +219,14 @@ export default function Page() {
     return data as Workspace
   }
   useEffect(() => {
-    load().catch((e) => {
-      if (e.status !== 401) E(e.message)
-    })
+    load()
+      .then((data) => {
+        if (data.role === 'owner' && location.pathname === '/' && !location.search)
+          history.replaceState(null, '', '/team')
+      })
+      .catch((e) => {
+        if (e.status !== 401) E(e.message)
+      })
     if (new URLSearchParams(location.search).has('signin')) {
       history.replaceState(null, '', '/workspace' + location.search)
       if (location.search.includes('signin=failed'))
@@ -384,7 +394,11 @@ export default function Page() {
       if (modal === 'revoke')
         await request(
           'admin/' +
-            (tab === 'Workspace' ? 'members' : tab === 'Access grants' ? 'grants' : 'connections') +
+            (tab === 'Workspace' || tab === 'Team overview'
+              ? 'members'
+              : tab === 'Access grants'
+                ? 'grants'
+                : 'connections') +
             '/' +
             selected,
           undefined,
@@ -467,8 +481,8 @@ export default function Page() {
           <ConsoleLogin
             request={request}
             done={async (setup) => {
-              await load()
-              if (setup) go('Workspace')
+              const data = await load()
+              if (setup || (data.role === 'owner' && pathname === '/')) go('Team overview')
             }}
           />
           {error}
@@ -561,13 +575,15 @@ export default function Page() {
           }
         />
         <nav id="workspace-nav" aria-label="Workspace navigation">
-          {tabs.map(([t, Icon]) => (
-            <a href={paths[t]} key={t} aria-current={t === tab ? 'page' : undefined}>
-              <Icon size={18} />
-              {t}
-              {t === 'Approvals' && w.approvals.length > 0 && <b>{w.approvals.length}</b>}
-            </a>
-          ))}
+          {tabs
+            .filter(([t]) => t !== 'Team overview' || w.role === 'owner')
+            .map(([t, Icon]) => (
+              <a href={paths[t]} key={t} aria-current={t === tab ? 'page' : undefined}>
+                <Icon size={18} />
+                {t}
+                {t === 'Approvals' && w.approvals.length > 0 && <b>{w.approvals.length}</b>}
+              </a>
+            ))}
         </nav>
         <div className="version">
           OpenPassword <code>v{w.version}</code>
@@ -615,7 +631,16 @@ export default function Page() {
           </div>
         </header>
         <div className="canvas">
-          {tab === 'Private vault' ? (
+          {tab === 'Team overview' ? (
+            <TeamOverview
+              key={w.tenant}
+              name={name || w.tenant}
+              members={w.members}
+              revision={revision}
+              request={request}
+              open={show}
+            />
+          ) : tab === 'Private vault' ? (
             <PrivateVault key={w.tenant} providers={w.providers} request={request} />
           ) : tab === 'Vault items' ? (
             <>
@@ -1163,7 +1188,7 @@ export default function Page() {
               })()}
             <p>
               {modal === 'member'
-                ? 'Give this token to the member through a private channel.'
+                ? 'Send the sign-in address and token through a private channel. The token grants workspace access until you revoke the member.'
                 : modal === 'app'
                   ? 'Copy the action-check credential now and provide it to the registered application.'
                   : modal === 'grant' && !tokens.startsWith('{')
@@ -1178,7 +1203,20 @@ export default function Page() {
                 <pre>{`export OPENPASSWORD_BROKER=${location.origin}\nopenpassword connect`}</pre>
               </>
             )}
-            <pre>{tokens}</pre>
+            {modal === 'member' ? (
+              <>
+                <label>
+                  Member sign-in address
+                  <input readOnly value={location.origin + '/?member=1'} />
+                </label>
+                <label>
+                  Member access token
+                  <input readOnly type="password" value={tokens} autoComplete="off" />
+                </label>
+              </>
+            ) : (
+              <pre>{tokens}</pre>
+            )}
             <button
               onClick={() =>
                 work(async () => {
@@ -1188,7 +1226,7 @@ export default function Page() {
               }
             >
               {copied ? <Check size={16} /> : <Copy size={16} />}{' '}
-              {copied ? 'Copied' : 'Copy credentials'}
+              {copied ? 'Copied' : modal === 'member' ? 'Copy member token' : 'Copy credentials'}
             </button>
           </>
         ) : (
@@ -1413,7 +1451,7 @@ export default function Page() {
                 </label>
                 <label>
                   Password or secure note
-                  <textarea name="value" required />
+                  <textarea name="value" required autoComplete="off" />
                 </label>
               </>
             )}
@@ -1460,9 +1498,9 @@ export default function Page() {
                 </label>
                 <label>
                   Role
-                  <select name="role">
-                    <option value="viewer">Viewer</option>
-                    <option value="editor">Editor</option>
+                  <select name="role" defaultValue="viewer">
+                    <option value="viewer">Viewer · inventory and audit</option>
+                    <option value="editor">Editor · reveal shared logins and manage access</option>
                   </select>
                 </label>
               </>

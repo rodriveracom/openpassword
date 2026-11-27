@@ -47,14 +47,25 @@ test('workspace memberships, revocation and human-only vault items', async (t) =
     headers: { cookie: owner },
   })
   assert.equal((await post('/admin/items/' + item.id + '/reveal', {}, e)).statusCode, 401)
+  const overview = (cookie: string) =>
+    api.inject({ url: '/admin/team-overview', headers: { cookie } })
+  assert.equal((await overview(v)).statusCode, 403)
+  const result = await overview(owner)
+  assert.equal(result.json().access.member, 'Team editor')
+  assert.equal(result.json().access.item, item.id)
+  assert.ok(!result.body.includes('test password'))
+  const second = (await post('/admin/workspaces', { label: 'Another team' }, owner)).json()
+  await post('/admin/switch', second, owner)
+  assert.deepEqual((await overview(owner)).json(), { item: null, access: null })
 })
 test('percent script notebook round trip preserves cell kind and source', () => {
   const source = '# %% [markdown]\n# Introduction\n# %%\nprint("example")\n'
   assert.equal(notebookToScript(scriptToNotebook(source)), source)
 })
 test('notebook semantic receipts retain cell IDs, attachments and unknown metadata', async () => {
-  const { notebookSemantics, compareNotebookSemantics } =
-    await import('../packages/connectors/local.ts')
+  const { notebookSemantics, compareNotebookSemantics } = await import(
+    '../packages/connectors/local.ts'
+  )
   const source = {
     metadata: { jupytext: { text_representation: { jupytext_version: 'one' } } },
     cells: [

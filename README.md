@@ -8,6 +8,7 @@ OpenPassword runs on your laptop or a Linux server. Applications and agents can 
 
 | I want to… | Start here |
 | --- | --- |
+| Show a company how shared logins work | [Three-minute team demo](docs/company-demo.md) |
 | Try OpenPassword on my machine | [Start locally](#start-locally) |
 | Call OpenPassword directly from a service or script | [HTTP quickstart and API reference](docs/http-api.md) |
 | Connect a coding assistant, Python framework or Rasa action to a local CLI | [Native harness integrations and examples](examples/harnesses/README.md) |
@@ -28,11 +29,13 @@ make setup
 make dev
 ```
 
-1. Open **http://localhost:3000**. The first visit shows **Create your administrator account**.
+1. Open **http://localhost:3000**. The first visit shows **Set up your team vault**. Choose **On this computer** and **User installation**.
 2. Run `node public/openpassword-cli.cjs setup-code` in a second terminal. The ten-minute code is for creating the first administrator.
-3. Enter the code, choose a username and password, and create your account. First-time setup closes as soon as the administrator exists. Google, GitHub, and Apple sign-in are optional.
+3. Enter the code, select **Continue to account**, choose a username and password, and create your account. First-time setup closes as soon as the administrator exists. Google, GitHub, and Apple sign-in are optional.
 
-You can now add a **connection**, a named provider account whose credential OpenPassword stores. A **grant** gives one client permission to use that connection for selected operations and a limited time. Choose either walkthrough below.
+The administrator lands on **Team overview**. Choose **Add shared login** to store a team account, add a teammate and check their access record.
+
+To connect an application or agent, add a **connection**, a named provider account whose credential OpenPassword stores. A **grant** gives one client permission to use that connection for selected operations and a limited time. Choose either walkthrough below.
 
 ## Personal vault and approved agent hosts
 

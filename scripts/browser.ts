@@ -1,3 +1,4 @@
+import { companyDemo, capture } from './company-demo.ts'
 import { newVaultKey, encryptPrivate, importVaultKey } from '../app/private-crypto.ts'
 import { chromium } from 'playwright-core'
 import { spawn, execFile } from 'node:child_process'
@@ -9,6 +10,7 @@ import assert from 'node:assert/strict'
 import { service } from '../server/service.ts'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
+const demo = process.argv.includes('--company')
 const dir = mkdtempSync(join(tmpdir(), 'openpassword-browser-'))
 const probe = createServer()
 probe.listen(0, '127.0.0.1')
@@ -37,23 +39,15 @@ try {
     }
     assert.ok(ready, 'Production console did not reach its isolated broker')
     const browser = await chromium.launch({
+      headless: !(demo && process.env.OPENPASSWORD_DEMO_LIVE === '1'),
       executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
       args:
         process.env.OPENPASSWORD_BROWSER_SINGLE_PROCESS === '1'
           ? ['--no-sandbox', '--single-process', '--no-zygote', '--disable-gpu']
           : [],
     })
-    try {
+    async function exerciseConsole() {
       const p = await browser.newPage()
-      const contract = await p.request.get(origin + '/v1/openapi.json')
-      assert.equal(contract.status(), 200)
-      assert.equal((await contract.json()).openapi, '3.1.0')
-      const pair = await p.request.post(origin + '/v1/device/authorizations', {
-        headers: { 'OpenPassword-Protocol-Version': '1' },
-        data: { device_name: 'remote client' },
-      })
-      assert.equal(pair.status(), 200)
-      assert.equal((await pair.json()).verification_url, origin + '/device')
       await p.goto(origin)
       const cli = (command: string, input = '') =>
         new Promise<string>((resolve, reject) => {
@@ -73,10 +67,29 @@ try {
           )
           child.stdin!.end(input)
         })
+      if (demo) {
+        await p.setViewportSize({ width: 1280, height: 800 })
+        await p.getByRole('button', { name: 'On a remote server' }).click()
+        await capture(p, '01-operator')
+        await p.getByRole('button', { name: 'On this computer' }).click()
+      }
       await p.getByLabel('Setup code', { exact: true }).fill(await cli('setup-code'))
+      await p.getByRole('button', { name: 'Continue to account' }).click()
       await p.getByLabel('Username').fill('operator')
       await p.getByLabel('Choose a password').fill('browser-only-fixture')
       await p.getByRole('button', { name: 'Create administrator' }).click()
+      await p.getByRole('heading', { name: 'Your team vault' }).waitFor()
+      if (demo) return companyDemo(p, browser, origin)
+      const contract = await p.request.get(origin + '/v1/openapi.json')
+      assert.equal(contract.status(), 200)
+      assert.equal((await contract.json()).openapi, '3.1.0')
+      const pair = await p.request.post(origin + '/v1/device/authorizations', {
+        headers: { 'OpenPassword-Protocol-Version': '1' },
+        data: { device_name: 'remote client' },
+      })
+      assert.equal(pair.status(), 200)
+      assert.equal((await pair.json()).verification_url, origin + '/device')
+      await p.getByRole('link', { name: 'Workspace', exact: true }).click()
       await p.getByRole('heading', { name: 'Authentication' }).waitFor()
       await p.getByText('Google · Optional').click()
       assert.equal(
@@ -409,6 +422,9 @@ try {
       console.log(
         'Desktop login, sealed credential enrollment, scope selection, grant issuance, mobile search and details, source download, logout, private vault recovery and delegation, and host enrollment passed.',
       )
+    }
+    try {
+      await exerciseConsole()
     } finally {
       await browser.close()
     }
