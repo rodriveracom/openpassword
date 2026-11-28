@@ -1,24 +1,39 @@
 # OpenPassword
 
-**An open-source credential manager for model routing and agentic tools.**
+**Let your agents use your accounts without handing them your keys.**
 
-Give Claude Code permission to read a GitHub account for a week. Let an application call a specific model through your OpenAI account with a spending limit. In both cases, the provider key stays on your server. Each client gets its own access token, permissions, and usage history.
+OpenPassword is a self-hosted credential manager and model router. Your provider keys stay on your server. Each agent or application gets its own grant: chosen operations, an expiry, a record of what it did, and a switch to turn it off.
 
-OpenPassword runs on your laptop or a Linux server. Applications and agents can use the HTTP REST API, local CLI or MCP. Python and TypeScript clients are also available. Applications can route model calls through the OpenAI-compatible Chat Completions API.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/grants-dark.png">
+  <img src="docs/img/grants-light.png" alt="Access grants for three agents, each tied to one connection with an expiry">
+</picture>
 
-| I want to… | Start here |
-| --- | --- |
-| Show a company how shared logins work | [Three-minute team demo](docs/company-demo.md) |
-| Try OpenPassword on my machine | [Start locally](#start-locally) |
-| Call OpenPassword directly from a service or script | [HTTP quickstart and API reference](docs/http-api.md) |
-| Connect a coding assistant, Python framework or Rasa action to a local CLI | [Native harness integrations and examples](examples/harnesses/README.md) |
-| Give Codex or Claude Code an MCP tool | [Connect an agent](#connect-an-agent) |
-| Make a model request from my app | [Route a model request](#route-a-model-request) |
-| Run the server in the cloud and the agent on my laptop | [Deploy on a server](#deploy-on-a-server) |
+*One grant per agent: what it may do, and until when.*
 
-For vault key custody, signed releases, CLI deposits and the findings from the security review, see [SECURITY.md](SECURITY.md). To set up passkeys, encrypted human sharing, recovery kits, device unlock or a separately hosted model gateway, follow [Security operations](docs/security-custody.md).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/approvals-dark.png">
+  <img src="docs/img/approvals-light.png" alt="Two newsletter drafts waiting for approval, each showing its arguments">
+</picture>
 
-## Start locally
+*Two drafts waiting for a person, each with the arguments it would send.*
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/consumption-dark.png">
+  <img src="docs/img/consumption-light.png" alt="Requests, tokens and estimated spend grouped by credential">
+</picture>
+
+*See what each credential and agent used, with estimated spend.*
+
+<img src="docs/img/phone-approvals-light.png" alt="Pending approvals on a phone" width="320">
+
+<sub>Screenshots are from a throwaway installation with made-up accounts and agents; no provider was contacted (<code>scripts/screenshots.ts</code>). They show standalone grants; on a new installation each grant is also bound to an enrolled host.</sub>
+
+## How it fits
+
+<img src="docs/img/architecture.svg" alt="Agents and applications send requests with their own grant to OpenPassword, which holds the provider keys and calls the providers">
+
+## Quick start
 
 From the root of a cloned or extracted copy of this project, with **Node.js 24 LTS**, **npm**, **Make** and **Go 1.25 or later** installed. `make setup` downloads the two engines' sources from the Go module proxy, so it needs network access (or a module cache that already holds them):
 
@@ -35,120 +50,35 @@ make dev
 
 The administrator lands on **Team overview**. Choose **Add shared login** to store a team account, add a teammate and check their access record.
 
-To connect an application or agent, add a **connection**, a named provider account whose credential OpenPassword stores. A **grant** gives one client permission to use that connection for selected operations and a limited time. Choose either walkthrough below.
+To connect an application or agent, add a **connection**, a named provider account whose credential OpenPassword stores. A **grant** gives one client permission to use that connection for selected operations and a limited time. Next: [connect a coding agent](docs/walkthroughs.md#connect-an-agent), which on a new installation starts by enrolling the agent's machine, or [route a model request](docs/walkthroughs.md#route-a-model-request).
+
+## What makes it different
+
+- **The key stays put.** A client holds a grant token for chosen operations on one connection. The provider key is used by the server and is not sent to the client.
+- **Narrow and temporary.** Grants name their operations and expire. Revoking one stops later calls.
+- **You approve writes.** Operations that need approval wait for a person, with a preview of the request. If you give a grant a standing draft allowance, drafts within it do not wait.
+- **Model access with limits.** A model grant is fixed to one connection and one model, with a call limit, a cap on output tokens per request and an optional budget.
+- **Bound to a host.** New workspaces require agent requests to be signed by an enrolled host, so a copied token is not enough on another machine.
+- **A private vault for people.** Personal items are encrypted in the browser. Handing one to the gateway is an explicit step that creates a separate copy.
+- **HTTP, CLI and MCP.** Use it from a script, a coding assistant or an application. Chat Completions is OpenAI-compatible.
+
+**Limits you should know.** Behavior with physical authenticators has not been verified, and there has been no independent cryptographic review. Read [SECURITY.md](SECURITY.md) before relying on it for anything sensitive.
+
+| I want to… | Start here |
+| --- | --- |
+| Show a company how shared logins work | [Three-minute team demo](docs/company-demo.md) |
+| Give Codex or Claude Code an MCP tool | [Connect an agent](docs/walkthroughs.md#connect-an-agent) |
+| Make a model request from my app | [Route a model request](docs/walkthroughs.md#route-a-model-request) |
+| Call it directly from a service or script | [HTTP quickstart and API reference](docs/http-api.md) |
+| Connect a coding assistant, Python framework or Rasa action to a local CLI | [Native harness integrations](examples/harnesses/README.md) |
+| Run the server in the cloud and the agent on my laptop | [Deploy on a server](#deploy-on-a-server) |
+| Set up passkeys, sharing, recovery or a separate model gateway | [Security operations](docs/security-custody.md) |
 
 ## Personal vault and approved agent hosts
 
 For a personal password or API key, open **Private vault**, generate and confirm your saved key, choose a separate vault passphrase, and add the item there. **Delegate to gateway** creates a separate provider connection only when you authorize a copy.
 
 Run `openpassword host connect` as the dedicated host service account on the agent machine, and `openpassword pair` as each agent's own account; the [host instructions](docs/operations.md#enroll-an-agent-host-and-approve-its-agents) say which steps need sudo. For a machine that runs several agents, issue a **host enrollment token** under Workspace, then run `openpassword host connect` on that machine and start its signing bridge. Each agent runs `openpassword pair` through the bridge. Approve each request under Access grants with its own connection, operations and expiry. New workspaces require host approval. Existing standalone workspaces switch when their first host enrolls. Follow the [host installation and agent enrollment instructions](docs/operations.md#enroll-an-agent-host-and-approve-its-agents).
-
-## Connect an agent
-
-For a workspace using standalone grants, this walkthrough lets a coding agent read your GitHub profile. You need a GitHub token that can read the authenticated user, plus Codex or Claude Code installed on the machine where you run the agent.
-
-**1. Connect GitHub.** In **Integrations → GitHub → Connect account**, give the connection a recognizable name, enter your GitHub username as the account identity, and enter the provider token. Choose **Me** to keep the connection private. Save it.
-
-**2. Connect the local CLI.** The client machine needs Node.js 24 or newer. Your web server serves a standalone CLI, including its MCP tools. In the web app, open **Access grants → Issue grant**, choose the GitHub connection, select `github.user.get` and set an expiry. Choose **One-time CLI enrollment token**. On the client, run:
-
-**Run as:** the OS account that runs the agent · **Where:** the client machine, in a verified release checkout · **sudo:** no
-
-```sh
-export OPENPASSWORD_BROKER=https://vault.example.com
-export OPENPASSWORD_AGENT=my-codex
-# From a verified release checkout, use its trusted installer and manifest.
-# Set OPENPASSWORD_CLI_SHA256 to the public/openpassword-cli.cjs digest from that release.
-: "${OPENPASSWORD_CLI_SHA256:?Set the independently verified release digest}"
-export OPENPASSWORD_CLI_SHA256
-sh deploy/update-client.sh
-export PATH="$HOME/.local/bin:$PATH"
-openpassword connect
-openpassword whoami
-openpassword capabilities
-```
-
-Use your installation’s HTTPS address, or `http://localhost:3000` when the server runs on this computer. Paste the token at the hidden prompt. The token can be redeemed once within ten minutes. Compare the returned device ID with the grant in the console. The profile is scoped to this broker and agent name. The CLI stores the profile locally, and the server checks grant validity on requests. Keep separate OS accounts for agents that must be isolated from one another.
-
-**Fetch an artifact.** An operation that returns its result as an artifact (for example a Gmail page read) reports an `artifact_id` and a `content_sha256`. Run `openpassword artifact ART_ID [SHA256]` to write the artifact's exact bytes to standard output; with the digest it verifies them first and writes nothing on a mismatch. The artifact is valid for fifteen minutes and only for the grant that produced it.
-
-**Watch activity.** Open **Activity** at `/activity` for live workspace activity visible to you. Use `openpassword watch` for events from this CLI grant, or `openpassword activity` for a snapshot. MCP exposes `whoami` and `activity` through the same profile.
-
-**3. Register the tool server.** Run the command for your client in the same terminal, after pairing finishes.
-
-The examples below assume one private harness configuration per agent. For a shared harness configuration, keep profile selection in a launcher that verifies the calling identity and exits if it cannot identify it.
-
-**Codex**
-
-
-**Run as:** the same account · **Where:** the same terminal on the client machine · **sudo:** no (both commands below)
-```sh
-codex mcp add openpassword \
-  --env OPENPASSWORD_BROKER="$OPENPASSWORD_BROKER" \
-  --env OPENPASSWORD_AGENT="$OPENPASSWORD_AGENT" \
-  -- "$HOME/.local/bin/openpassword" mcp
-```
-
-**Claude Code**
-
-**Claude Code user · agent workstation · no sudo**
-
-```sh
-claude mcp add --scope user --transport stdio openpassword \
-  --env OPENPASSWORD_BROKER="$OPENPASSWORD_BROKER" \
-  --env OPENPASSWORD_AGENT="$OPENPASSWORD_AGENT" \
-  -- "$HOME/.local/bin/openpassword" mcp
-```
-
-**4. Make the first call.** Open your coding agent and ask:
-
-> Use OpenPassword to list my connections and permitted operations. Then use my GitHub connection to tell me my GitHub username.
-
-The agent can discover and invoke the read operation you selected. Open **Consumption** to see the upstream request. To check pairing directly from the terminal, run `openpassword connections`. To end access, revoke the grant in **Access grants**.
-
-The MCP connection gives the agent tools. The coding client continues to use its own configured model for inference.
-
-## Route a model request
-
-OpenPassword routes each model grant to **one provider connection and one exact model ID**. Supported upstreams are OpenAI, OpenRouter, and Moonshot. Clients can discover their authorized model through `GET /v1/models` and use `POST /v1/chat/completions` for text, streaming responses, and tool calls.
-
-On an enrolled host, use the [host-signed HTTP example](docs/http-api.md#try-the-api) and run `node examples/http/agent.ts chat`. The bearer-only Python walkthrough below applies to workspaces that allow standalone grants.
-
-1. Add your provider under **Connections**. For this example, choose OpenAI and enter your provider API key.
-2. In **Access grants → Issue grant**, name the client, select the connection, and enable `openai.chat`. Under **Standing model access**, enter a model ID available to your provider account, permit at least one request, and allow at least 32 output tokens. You can also set a monetary budget using the provider’s rates.
-3. Choose **API access and refresh tokens**, leave the pairing code blank, issue the grant, and copy its **access token**. The following Python 3 example prompts for that token without echoing it, discovers the authorized model, and makes one request.
-
-**Run as:** any account · **Where:** the machine running your application · **sudo:** no
-
-```python
-import getpass
-import json
-import os
-import urllib.request
-
-base = os.environ.get("OPENPASSWORD_BROKER", "http://localhost:3000").rstrip("/")
-token = getpass.getpass("OpenPassword access token: ")
-
-def api(path, body=None):
-    request = urllib.request.Request(
-        base + "/v1/" + path,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        return json.load(response)
-
-model = api("models")["data"][0]["id"]
-reply = api("chat/completions", {
-    "model": model,
-    "messages": [{"role": "user", "content": "Say hello in one sentence."}],
-    "max_tokens": 32,
-})
-print(reply["choices"][0]["message"]["content"])
-```
-
-For an enrolled CLI with a model grant, use `openpassword models` to list its models. Send a prompt with `openpassword chat MODEL MAX_TOKENS REQUEST_KEY < prompt.txt`. Use a unique key for each intended call. MCP exposes the same operations as `models` and `chat`.
-
-A successful call prints the model’s reply. Open **Consumption** to see the model, request, and reported token counts. With pricing configured, you also see estimated spend. Requests without pricing are marked **Unpriced**. For a long-running client, use the grant’s refresh token to renew access; the paired CLI handles renewal automatically.
 
 ## Deploy on a server
 
@@ -183,4 +113,4 @@ This candidate distributes the server, console, first-party packages and example
 
 ## Update an existing installation
 
-For the supplied Linux services, on the server as root, install the exact gate-built archive using `sudo sh deploy/upgrade.sh --install ARCHIVE SHA256 VERSION COMMIT`. The updater checks readiness and restores the previous build on failure. On each workstation, as the account that uses the CLI (no sudo), `sh deploy/update-client.sh` updates the installed CLI using its configured broker address. [Upgrade and rollback instructions](docs/operations.md#upgrade-a-running-systemd-installation)
+For the supplied Linux services, on the server as root, install the exact gate-built archive using `sudo sh deploy/upgrade.sh --install ARCHIVE SHA256 VERSION COMMIT`. The updater checks readiness. If activation fails before the new release goes public, it restores the previous build; a later failure is recovered forward with `--recover`. On each workstation, as the account that uses the CLI (no sudo), `sh deploy/update-client.sh` updates the installed CLI using its configured broker address. [Upgrade and rollback instructions](docs/operations.md#upgrade-a-running-systemd-installation)

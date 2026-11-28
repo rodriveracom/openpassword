@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 280" font-family="system-ui, sans-serif" role="img" aria-label="Agents and applications send requests with their own grant to OpenPassword, which holds the provider keys and calls the providers">
+  <rect width="900" height="280" rx="16" fill="#faf7f1"/>
+  <g fill="#ffffff" stroke="#25221e" stroke-width="1.5">
+    <rect x="30" y="50" width="220" height="180" rx="12"/>
+    <rect x="340" y="30" width="220" height="220" rx="12" stroke-width="3"/>
+    <rect x="650" y="50" width="220" height="180" rx="12"/>
+  </g>
+  <g fill="#25221e" text-anchor="middle">
+    <g font-size="18" font-weight="600">
+      <text x="140" y="86">Agents and apps</text>
+      <text x="450" y="66">OpenPassword</text>
+      <text x="760" y="86">Providers</text>
+    </g>
+    <g font-size="15">
+      <text x="140" y="130">Coding assistants</text>
+      <text x="140" y="160">Scripts and services</text>
+      <text x="140" y="190">CLI, MCP or HTTP</text>
+      <text x="450" y="112">Provider keys</text>
+      <text x="450" y="142">Grants and expiry</text>
+      <text x="450" y="172">Approvals</text>
+      <text x="450" y="202">Usage and activity</text>
+      <text x="760" y="130">GitHub, Google, Notion</text>
+      <text x="760" y="160">OpenAI, OpenRouter</text>
+      <text x="760" y="190">and others</text>
+    </g>
+  </g>
+  <g stroke="#25221e" stroke-width="2" fill="none">
+    <path d="M252 140H334"/>
+    <path d="M562 140H644"/>
+  </g>
+  <g fill="#25221e">
+    <path d="M338 140l-12-6v12z"/>
+    <path d="M648 140l-12-6v12z"/>
+    <g font-size="13" text-anchor="middle">
+      <text x="295" y="128">grant token</text>
+      <text x="605" y="128">provider key</text>
+    </g>
+  </g>
+</svg>
